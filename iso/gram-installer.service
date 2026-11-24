@@ -1,0 +1,19 @@
+[Unit]
+Description=Gram bootc installer
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/usr/local/bin/gram
+
+[Service]
+Type=simple
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+ExecStart=/usr/local/bin/gram
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

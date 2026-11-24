@@ -1,0 +1,56 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "dependencyDashboard": true,
+  "schedule": ["after 6am and before 9am on Monday"],
+  "prConcurrentLimit": 3,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Base image digest used by the live ISO build",
+      "managerFilePatterns": ["/(^|/)scripts/build-iso\\.sh$/"],
+      "matchStrings": [
+        "BASE_IMAGE=\"\\$\\{BASE_IMAGE:-[^\"@]+@(?<currentDigest>sha256:[a-f0-9]{64})\\}\""
+      ],
+      "depNameTemplate": "quay.io/fedora/fedora-bootc",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Pinned zigzag release and commit in build.zig.zon",
+      "managerFilePatterns": ["/(^|/)build\\.zig\\.zon$/"],
+      "matchStrings": [
+        "git\\+https://github\\.com/meszmate/zigzag\\?ref=v(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)#(?<currentDigest>[a-f0-9]{40})"
+      ],
+      "depNameTemplate": "meszmate/zigzag",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver",
+      "autoReplaceStringTemplate": "git+https://github.com/meszmate/zigzag?ref=v{{{newValue}}}#{{{newDigest}}}"
+    },
+    {
+      "customType": "regex",
+      "description": "Minimum Zig toolchain version",
+      "managerFilePatterns": ["/(^|/)build\\.zig\\.zon$/"],
+      "matchStrings": ["minimum_zig_version = \"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""],
+      "depNameTemplate": "ziglang/zig",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Zig changes need a deliberate review and a matching zigzag version",
+      "matchPackageNames": ["ziglang/zig"],
+      "groupName": "zig toolchain",
+      "automerge": false
+    },
+    {
+      "description": "Renovate cannot compute the Zig package hash, so the PR needs a follow-up command",
+      "matchPackageNames": ["meszmate/zigzag"],
+      "prBodyNotes": [
+        "Run `ZIG=/path/to/zig-0.16.0/zig ./scripts/update-zigzag-hash.sh` and commit the regenerated `.hash`."
+      ]
+    }
+  ]
+}
