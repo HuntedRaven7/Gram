@@ -9,6 +9,7 @@ const execute = @import("execute.zig");
 const verify = @import("verify.zig");
 const cli = @import("cli.zig");
 const tui = @import("tui.zig");
+const tests = @import("tests.zig");
 
 comptime {
     _ = profile;
@@ -18,6 +19,7 @@ comptime {
     _ = plan;
     _ = execute;
     _ = verify;
+    _ = tests;
 }
 
 fn writeOut(io: std.Io, text: []const u8) !void {

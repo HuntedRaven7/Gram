@@ -14,7 +14,7 @@ check() {
   shift
   local actual
   actual="$(mktemp)"
-  "$bin" --dry-run "$@" > "$actual"
+  "$bin" --dry-run "$@" >"$actual"
   if diff -u "$root/tests/golden/$name.txt" "$actual"; then
     echo "$name dry-run: OK"
   else

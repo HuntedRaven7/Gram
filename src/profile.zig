@@ -28,6 +28,7 @@ pub fn get(id: Id) Profile {
                 "systemd.firstboot=no",
                 "quiet",
                 "systemd.volatile=yes",
+                "console=ttyS0,115200",
             },
         },
         .muramasa => .{

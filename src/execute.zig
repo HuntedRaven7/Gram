@@ -115,7 +115,11 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
             .command => |cmd| {
                 try note(r, cmd.label);
                 print(cmd.label);
-                r.run(cmd.argv) catch |err| {
+                const outcome = if (cmd.stdin) |input|
+                    r.runStdin(input, cmd.argv)
+                else
+                    r.run(cmd.argv);
+                outcome catch |err| {
                     if (!cmd.allow_fail) return err;
                     print("step failed, continuing");
                 };

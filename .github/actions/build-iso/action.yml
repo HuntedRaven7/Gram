@@ -1,0 +1,28 @@
+name: Build Gram ISO
+description: Builds the UEFI live installer ISO with a pinned Zig toolchain.
+inputs:
+  ci-config:
+    description: Optional headless config to bake into the live root.
+    required: false
+    default: ""
+outputs:
+  iso:
+    description: Path to the built ISO.
+    value: dist/gram-installer-amd64.iso
+runs:
+  using: composite
+  steps:
+    - name: Set up Zig
+      uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      with:
+        version: 0.16.0
+    - name: Install ISO build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y podman mtools squashfs-tools xorriso
+    - name: Build ISO
+      shell: bash
+      env:
+        GRAM_CI_CONFIG: ${{ inputs.ci-config }}
+      run: ZIG=zig ./scripts/build-iso.sh

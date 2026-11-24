@@ -35,6 +35,14 @@ Renovate cannot compute a Zig package hash. After a zigzag PR, run `ZIG=/path/to
 
 The RPM packages installed by `dnf` during the ISO build are not tracked. They follow the Fedora base image, so updating the base digest changes them.
 
+## CI
+
+`ci.yml` runs on push and pull requests. It builds Gram, runs the tests, checks Zig formatting, compares the dry-run goldens, runs ShellCheck and shfmt over `scripts/*.sh`, lints workflows with zizmor, scans for secrets with gitleaks, and boots the ISO in QEMU with OVMF to confirm that `gram-installer.service` starts.
+
+`full-install.yml` runs on push to `main`, pull requests, and manual triggers. It bakes `tests/ci-install.json` into the ISO, installs the pinned Mjolnir image onto a blank disk, reboots without the ISO, and checks the target serial login. The ISO build uses a shared composite action, and all third-party actions are pinned by commit SHA so Renovate can update them.
+
+`iso.yml` runs on `v*` tags and manual triggers. It uploads the ISO and `sha256sums.txt` as artifacts. On tags it publishes a GitHub release and a build provenance attestation for the ISO.
+
 ## Install profiles
 
 A profile owns the image reference, filesystem, bootloader, minimum disk size, kernel arguments, and the expected state partition label.
