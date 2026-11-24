@@ -71,5 +71,10 @@ fn run(init: std.process.Init) !void {
 }
 
 pub fn main(init: std.process.Init) !void {
-    try run(init);
+    run(init) catch |err| {
+        const message = config.errorMessage(err) orelse @errorName(err);
+        writeErr(init.io, message) catch {};
+        writeErr(init.io, "\n") catch {};
+        std.process.exit(1);
+    };
 }

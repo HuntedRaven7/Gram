@@ -94,6 +94,19 @@ pub fn validate(c: Config) !void {
     if (c.disk.len == 0 or !std.mem.startsWith(u8, c.disk, "/dev/")) return error.InvalidDisk;
     if (c.ssid.len != 0 and !validPsk(c.psk)) return error.InvalidPsk;
     if (c.registry.len != 0 and c.registry_user.len == 0 and c.registry_token.len != 0) return error.MissingRegistryUser;
+    if (c.profile == .mjolnir and (c.username.len != 0 or c.password_hash.len != 0 or c.ssh_keys.len != 0)) {
+        return error.MjolnirRejectsDesktopIdentity;
+    }
+}
+
+pub fn errorMessage(err: anyerror) ?[]const u8 {
+    return switch (err) {
+        error.MjolnirRejectsDesktopIdentity => "mjolnir profile rejects username, passwordHash and sshKeys",
+        error.NoEligibleDisk => "no eligible disks: removable, mounted and boot disks are excluded",
+        error.DiskTooSmall => "target disk is below the profile minimum",
+        error.DiskNotEligible => "configured disk is not eligible",
+        else => null,
+    };
 }
 
 pub fn validPsk(psk: []const u8) bool {
