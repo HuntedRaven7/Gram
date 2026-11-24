@@ -25,6 +25,12 @@ pub const PersistWifi = struct {
     state_label: ?[]const u8,
 };
 
+pub const PersistMachineId = struct {
+    label: []const u8,
+    machine_id: []const u8,
+    state_label: ?[]const u8,
+};
+
 pub const Verify = struct {
     label: []const u8,
     disk: []const u8,
@@ -35,6 +41,7 @@ pub const Action = union(enum) {
     command: Command,
     write_file: WriteFile,
     persist_wifi: PersistWifi,
+    persist_machine_id: PersistMachineId,
     verify: Verify,
 };
 
@@ -193,10 +200,12 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         "--bootloader",
         p.bootloader,
     });
-    for (p.kargs) |karg| {
-        try bootc_args.append(allocator, try std.fmt.allocPrint(allocator, "--karg={s}", .{karg}));
+    if (p.id != .mjolnir) {
+        for (p.kargs) |karg| {
+            try bootc_args.append(allocator, try std.fmt.allocPrint(allocator, "--karg={s}", .{karg}));
+        }
+        try bootc_args.append(allocator, try std.fmt.allocPrint(allocator, "--karg=systemd.machine_id={s}", .{machine_id}));
     }
-    try bootc_args.append(allocator, try std.fmt.allocPrint(allocator, "--karg=systemd.machine_id={s}", .{machine_id}));
     try bootc_args.append(allocator, c.disk);
     try actions.append(allocator, .{ .command = .{
         .label = "bootc install to-disk",
@@ -219,6 +228,14 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         .argv = try dupeArgv(allocator, &.{ "umount", container_root }),
         .trace = true,
     } });
+
+    if (p.id == .mjolnir) {
+        try actions.append(allocator, .{ .persist_machine_id = .{
+            .label = "persist machine ID in target state partition",
+            .machine_id = machine_id,
+            .state_label = p.state_label,
+        } });
+    }
 
     if (c.ssid.len != 0) {
         try actions.append(allocator, .{ .persist_wifi = .{
@@ -562,11 +579,6 @@ test "bootc install leaves state partition creation to first boot" {
                     "btrfs",
                     "--bootloader",
                     "systemd",
-                    "--karg=systemd.firstboot=no",
-                    "--karg=quiet",
-                    "--karg=systemd.volatile=yes",
-                    "--karg=console=ttyS0,115200",
-                    "--karg=systemd.machine_id=00000000-0000-4000-8000-000000000000",
                     "/dev/vda",
                 });
             }
