@@ -1,6 +1,7 @@
 const std = @import("std");
 const config_mod = @import("config.zig");
 const profile_mod = @import("profile.zig");
+const signature_mod = @import("signature.zig");
 
 pub const Command = struct {
     label: []const u8,
@@ -34,6 +35,7 @@ pub const Action = union(enum) {
     command: Command,
     write_file: WriteFile,
     persist_wifi: PersistWifi,
+    verify_signature: signature_mod.Verification,
     verify: Verify,
 };
 
@@ -106,6 +108,12 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
             .stdin = try std.fmt.allocPrint(allocator, "{s}\n", .{c.registry_token}),
         } });
     }
+
+    try actions.append(allocator, .{ .verify_signature = .{
+        .image = c.image,
+        .certificate_identity = p.certificate_identity,
+        .oidc_issuer = p.oidc_issuer,
+    } });
 
     try actions.append(allocator, .{ .command = .{
         .label = "pull image",
@@ -210,4 +218,38 @@ test "plan builds both profiles and keeps secrets out of argv" {
 test "registry derived from image" {
     try std.testing.expectEqualStrings("ghcr.io", registryFromImage("ghcr.io/huntedraven7/mjolnir:testing"));
     try std.testing.expectEqualStrings("docker.io", registryFromImage("fedora:latest"));
+}
+
+test "signature verification uses profile identity before the pull" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var identities: [2][]const u8 = undefined;
+    for ([_]profile_mod.Id{ .mjolnir, .muramasa }, 0..) |id, i| {
+        var c = config_mod.defaults();
+        c.disk = "/dev/vda";
+        config_mod.applyProfile(&c, id);
+        const p = try build(a, c, "00000000-0000-4000-8000-000000000000");
+
+        var verify_index: ?usize = null;
+        var pull_index: ?usize = null;
+        for (p.actions, 0..) |action, j| switch (action) {
+            .verify_signature => |sig| {
+                verify_index = j;
+                identities[i] = sig.certificate_identity;
+                try std.testing.expectEqualStrings(profile_mod.get(id).certificate_identity, sig.certificate_identity);
+                try std.testing.expectEqualStrings(profile_mod.get(id).oidc_issuer, sig.oidc_issuer);
+                try std.testing.expectEqualStrings(c.image, sig.image);
+            },
+            .command => |cmd| {
+                if (std.mem.eql(u8, cmd.label, "pull image")) pull_index = j;
+            },
+            else => {},
+        };
+        try std.testing.expect(verify_index != null);
+        try std.testing.expect(pull_index != null);
+        try std.testing.expect(verify_index.? < pull_index.?);
+    }
+    try std.testing.expect(!std.mem.eql(u8, identities[0], identities[1]));
 }

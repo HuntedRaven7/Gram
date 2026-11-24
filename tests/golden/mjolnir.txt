@@ -4,6 +4,8 @@ reload NetworkManager
 [dry-run] nmcli connection reload
 connect WiFi
 [dry-run] nmcli connection up gram-wifi
+verify image signature
+[dry-run] cosign verify --certificate-identity-regexp ^https://github\.com/HuntedRaven7/Mjolnir/\.github/workflows/build\.yml@refs/heads/(testing|gh-readonly-queue/testing/.+)$ --certificate-oidc-issuer https://token.actions.githubusercontent.com --new-bundle-format=false ghcr.io/huntedraven7/mjolnir:testing
 pull image
 [dry-run] podman pull ghcr.io/huntedraven7/mjolnir:testing
 wipe target disk
