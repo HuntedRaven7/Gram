@@ -14,7 +14,7 @@ Include the affected commit, the impact, and a reproduction. A report that touch
 
 The installer reads registry credentials and WiFi keys from systemd credentials before it reads the JSON config. It passes registry tokens through `--password-stdin` and keeps WiFi keys out of argv. Dry-run output must never contain a password hash, WiFi key, or registry token. `tests.zig` checks that rule.
 
-The ISO is unsigned. The target image supplies the signed UKI. Secure Boot key enrollment stays a hardware step for the operator.
+The ISO is unsigned. The target image supplies the signed UKI. Secure Boot key enrollment stays a hardware step for the operator. The CI harness in `docs/secureboot-swtpm.md` consumes an enrolled variable store and signed and unknown UKIs from the Mjolnir image repo; it never enrolls keys or weakens the unlock assertions in this repository.
 
 ## Dependency updates
 

@@ -41,6 +41,8 @@ The RPM packages installed by `dnf` during the ISO build are not tracked. They f
 
 `full-install.yml` runs on push to `main`, pull requests, and manual triggers. It bakes `tests/ci-install.json` into the ISO, installs the pinned Mjolnir image onto a blank disk, reboots without the ISO, and checks the target serial login. The ISO build uses a shared composite action, and all third-party actions are pinned by commit SHA so Renovate can update them.
 
+`secureboot.yml` runs the same install, then boots the installed disk twice under OVMF and `swtpm` to check that a signed UKI update still unlocks the state volume and that an unknown-key UKI fails to unlock with a PCR policy failure. It uploads both serial logs. The enrolled OVMF variables and both UKI fixtures are published by the Mjolnir image repo, so the job is blocked until `SECUREBOOT_FIXTURE_BASE_URL` is set. See `docs/secureboot-swtpm.md` for the contract and the image-side TODO.
+
 `iso.yml` runs on `v*` tags and manual triggers. It uploads the ISO and `sha256sums.txt` as artifacts. On tags it publishes a GitHub release and a build provenance attestation for the ISO.
 
 ## Install profiles
