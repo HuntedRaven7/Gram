@@ -137,9 +137,9 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
     var bootc_args: std.ArrayListUnmanaged([]const u8) = .empty;
     errdefer bootc_args.deinit(allocator);
     try bootc_args.appendSlice(allocator, &.{
-        "podman",                                  "run",            "--rm",                    "--privileged", "--pid=host",
-        "-v",                                      "/dev:/dev",      "--tmpfs",                 "/run/udev",    "-v",
-        "/var/lib/containers:/var/lib/containers", "--security-opt", "label=type:unconfined_t", c.image,        "bootc",
+        "podman",                                  "run",            "--rm",                    "--privileged",           "--pid=host",
+        "-v",                                      "/dev:/dev",      "-v",                      "/run/udev:/run/udev:ro", "-v",
+        "/var/lib/containers:/var/lib/containers", "--security-opt", "label=type:unconfined_t", c.image,                  "bootc",
         "install",                                 "to-disk",        "--composefs-backend",
     });
     if (c.encrypt) try bootc_args.appendSlice(allocator, &.{ "--block-setup", "tpm2-luks" });
