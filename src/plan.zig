@@ -24,6 +24,11 @@ pub const PersistWifi = struct {
     required: bool,
 };
 
+pub const WipePartitions = struct {
+    label: []const u8,
+    disk: []const u8,
+};
+
 pub const Verify = struct {
     label: []const u8,
     disk: []const u8,
@@ -34,6 +39,7 @@ pub const Action = union(enum) {
     command: Command,
     write_file: WriteFile,
     persist_wifi: PersistWifi,
+    wipe_partitions: WipePartitions,
     verify: Verify,
 };
 
@@ -133,6 +139,10 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         .label = "release temporary swap",
         .argv = try dupeArgv(allocator, &.{ "swapoff", c.disk }),
     } });
+    try actions.append(allocator, .{ .wipe_partitions = .{
+        .label = "clear signatures in existing partitions",
+        .disk = c.disk,
+    } });
 
     var bootc_args: std.ArrayListUnmanaged([]const u8) = .empty;
     errdefer bootc_args.deinit(allocator);
@@ -194,6 +204,7 @@ test "plan builds both profiles and keeps secrets out of argv" {
     const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
 
     var found_install = false;
+    var found_partition_wipe = false;
     for (plan.actions) |action| switch (action) {
         .command => |cmd| {
             for (cmd.argv) |arg| try std.testing.expect(!std.mem.eql(u8, arg, "secret"));
@@ -202,9 +213,11 @@ test "plan builds both profiles and keeps secrets out of argv" {
                 try std.testing.expect(std.mem.indexOf(u8, cmd.argv[cmd.argv.len - 1], "/dev/vda") != null);
             }
         },
+        .wipe_partitions => found_partition_wipe = true,
         else => {},
     };
     try std.testing.expect(found_install);
+    try std.testing.expect(found_partition_wipe);
 }
 
 test "registry derived from image" {
