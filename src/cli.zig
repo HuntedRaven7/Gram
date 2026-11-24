@@ -146,8 +146,38 @@ pub fn prepare(allocator: std.mem.Allocator, io: std.Io, env: *const std.process
     return .{ .config = c, .disks = disks };
 }
 
+fn checkDns(allocator: std.mem.Allocator, io: std.Io, r: *runner_mod.Runner, host: []const u8) !void {
+    if (r.dry_run) {
+        try r.record(try std.fmt.allocPrint(allocator, "dns check skipped in dry-run for {s}\n", .{host}));
+        return;
+    }
+    try r.record(try std.fmt.allocPrint(allocator, "checking DNS for {s}\n", .{host}));
+    const result = std.process.run(allocator, io, .{
+        .argv = &.{ "getent", "hosts", host },
+        .timeout = .{ .duration = .{
+            .raw = std.Io.Duration.fromSeconds(60),
+            .clock = .boot,
+        } },
+    }) catch |err| {
+        try r.record(try std.fmt.allocPrint(allocator, "DNS failed for {s}: {s}\n", .{ host, @errorName(err) }));
+        return error.DnsResolutionFailed;
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    switch (result.term) {
+        .exited => |code| if (code == 0) {
+            try r.record(try std.fmt.allocPrint(allocator, "DNS ok for {s}\n", .{host}));
+            return;
+        },
+        else => {},
+    }
+    try r.record(try std.fmt.allocPrint(allocator, "DNS failed for {s}\n", .{host}));
+    return error.DnsResolutionFailed;
+}
+
 pub fn apply(allocator: std.mem.Allocator, io: std.Io, c: config_mod.Config, r: *runner_mod.Runner, print: *const fn ([]const u8) void) !void {
     try config_mod.validate(c);
+    try checkDns(allocator, io, r, plan_mod.registryFromImage(c.image));
     const id = if (r.dry_run) "00000000-0000-4000-8000-000000000000" else try machineId(allocator, io);
     const p = try plan_mod.build(allocator, c, id);
     try execute_mod.execute(allocator, r, p.actions, print);
