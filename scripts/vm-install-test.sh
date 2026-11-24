@@ -86,6 +86,38 @@ if grep -aq 'Gram installer' "$log2"; then
   echo "target boot: live ISO booted again" >&2
   status=1
 fi
+
+# A healthy target brings up every unit and survives boot without kernel faults.
+failed_units="$(grep -aE '\[FAILED\]|Failed to (start|mount)|Failed with result|Dependency failed' "$log2" || true)"
+if [ -n "$failed_units" ]; then
+  echo "target boot: failed systemd units detected" >&2
+  printf '%s\n' "$failed_units" >&2
+  status=1
+else
+  echo "target boot: no failed systemd units"
+fi
+
+kernel_faults="$(grep -aEi 'kernel panic|call trace' "$log2" || true)"
+if [ -n "$kernel_faults" ]; then
+  echo "target boot: kernel panic or Call Trace detected" >&2
+  printf '%s\n' "$kernel_faults" >&2
+  status=1
+else
+  echo "target boot: no kernel panic or Call Trace"
+fi
+
+# The signed UKI owns the command line and the kernel echoes it to the console.
+uki_cmdline="$(grep -a 'Kernel command line:' "$log2" || true)"
+if printf '%s\n' "$uki_cmdline" | grep -aE '(^|[[:space:]])composefs(=|\.digest=)[^[:space:]]' >/dev/null; then
+  echo "target boot: UKI cmdline has composefs argument"
+else
+  echo "target boot: UKI cmdline missing composefs argument" >&2
+  status=1
+fi
+# bootc status, Varlink and cosign provenance need guest execution or registry
+# trust material, so they cannot be asserted from the serial log here. The
+# machine id is stored in the state partition by issue 4, not in the UKI cmdline.
+
 echo "install log: $log1"
 echo "boot log: $log2"
 exit "$status"
