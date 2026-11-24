@@ -27,6 +27,14 @@ OVMF=/path/to/OVMF_CODE.fd ./scripts/vm-test.sh
 
 `vm-test.sh` boots the ISO in QEMU with OVMF and checks that `gram-installer.service` starts. Set `ISO`, `OVMF`, `DISK`, and `LOG` to override its defaults.
 
+## Dependency updates
+
+Renovate reads `renovate.json` through the GitHub App. It checks the Fedora bootc base digest in `scripts/build-iso.sh`, the pinned zigzag release in `build.zig.zon`, and `minimum_zig_version`. It opens PRs weekly. Nothing merges automatically.
+
+Renovate cannot compute a Zig package hash. After a zigzag PR, run `ZIG=/path/to/zig-0.16.0/zig ./scripts/update-zigzag-hash.sh` and commit the regenerated `build.zig.zon`. The script reads the ref that Renovate wrote and reruns `zig fetch --save`.
+
+The RPM packages installed by `dnf` during the ISO build are not tracked. They follow the Fedora base image, so updating the base digest changes them.
+
 ## Install profiles
 
 A profile owns the image reference, filesystem, bootloader, minimum disk size, kernel arguments, and the expected state partition label.

@@ -11,3 +11,4 @@ date	decision	why	evidence	result
 2026-11-24	core shape: pure Plan plus thin frontends	one owner per field of state, headless and TUI cannot drift	architect skill, src/plan.zig	unit tests and goldens pass
 2026-11-24	definition of done: QEMU OVMF boot plus WiFi plus pull plus installed target boot	verify the real artifact, not exit codes	prove-it-works principle	partial: boot verified, full install open
 2026-11-24	found a dangling argv slice bug in plan build	argv literals with runtime values were stack temporaries	segfault in dry-run; fixed with dupeArgv	goldens pass after fix
+2026-11-24	Renovate runner: GitHub App with repo config only	user chose the hosted app; postUpgradeTasks need self-hosted global config	user answer, renovate-config-validator output	config validates; digest and tag regexes match real files
