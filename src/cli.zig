@@ -146,10 +146,59 @@ pub fn prepare(allocator: std.mem.Allocator, io: std.Io, env: *const std.process
     return .{ .config = c, .disks = disks };
 }
 
+fn hasDigest(image: []const u8) bool {
+    return std.mem.indexOf(u8, image, "@sha256:") != null;
+}
+
+fn resolveImage(allocator: std.mem.Allocator, io: std.Io, image: []const u8) ![]const u8 {
+    if (hasDigest(image)) return image;
+    const ref = if (std.mem.indexOf(u8, image, "://") == null)
+        try std.fmt.allocPrint(allocator, "docker://{s}", .{image})
+    else
+        image;
+    const result = try std.process.run(allocator, io, .{
+        .argv = &.{ "skopeo", "inspect", "--format", "{{.Digest}}", ref },
+    });
+    defer allocator.free(result.stderr);
+    switch (result.term) {
+        .exited => |code| if (code != 0) {
+            allocator.free(result.stdout);
+            return error.DigestResolutionFailed;
+        },
+        else => {
+            allocator.free(result.stdout);
+            return error.DigestResolutionFailed;
+        },
+    }
+    const digest = std.mem.trim(u8, result.stdout, " \t\r\n");
+    if (!std.mem.startsWith(u8, digest, "sha256:")) {
+        allocator.free(result.stdout);
+        return error.DigestResolutionFailed;
+    }
+    const at = std.mem.indexOfScalar(u8, image, '@') orelse image.len;
+    const immutable = try std.fmt.allocPrint(allocator, "{s}@{s}", .{ image[0..at], digest });
+    allocator.free(result.stdout);
+    return immutable;
+}
+
+test "digest detection" {
+    try std.testing.expect(hasDigest("ghcr.io/huntedraven7/mjolnir@sha256:949e1a019f9d8b86586af85af81c398bc51d1d3eb22b3b3ef0d9bd6850d33b22"));
+    try std.testing.expect(!hasDigest("ghcr.io/huntedraven7/mjolnir:testing"));
+}
+
 pub fn apply(allocator: std.mem.Allocator, io: std.Io, c: config_mod.Config, r: *runner_mod.Runner, print: *const fn ([]const u8) void) !void {
     try config_mod.validate(c);
+    var resolved = c;
+    if (!hasDigest(c.image)) {
+        resolved.image = resolveImage(allocator, io, c.image) catch |err| blk: {
+            if (!r.dry_run) return err;
+            try r.record("warning: could not resolve image tag to a digest in dry-run\n");
+            break :blk c.image;
+        };
+    }
+    try r.record(try std.fmt.allocPrint(allocator, "resolved image: {s}\n", .{resolved.image}));
     const id = if (r.dry_run) "00000000-0000-4000-8000-000000000000" else try machineId(allocator, io);
-    const p = try plan_mod.build(allocator, c, id);
+    const p = try plan_mod.build(allocator, resolved, id);
     try execute_mod.execute(allocator, r, p.actions, print);
     if (r.dry_run) try r.record("[dry-run] install complete\n");
 }

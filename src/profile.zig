@@ -22,7 +22,7 @@ pub fn get(id: Id) Profile {
         .mjolnir => .{
             .id = .mjolnir,
             .label = "Mjolnir server",
-            .image = "ghcr.io/huntedraven7/mjolnir:testing",
+            .image = "ghcr.io/huntedraven7/mjolnir@sha256:949e1a019f9d8b86586af85af81c398bc51d1d3eb22b3b3ef0d9bd6850d33b22",
             .state_label = "MjolnirState",
             .kargs = &.{
                 "systemd.firstboot=no",
