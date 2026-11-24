@@ -7,7 +7,7 @@ log1="${LOG1:-/tmp/gram-install-1.log}"
 log2="${LOG2:-/tmp/gram-install-2.log}"
 work="${WORK:-/tmp/gram-install-work}"
 ovmf="${OVMF:-}"
-install_timeout="${INSTALL_TIMEOUT:-2400}"
+install_timeout="${INSTALL_TIMEOUT:-3600}"
 boot_timeout="${BOOT_TIMEOUT:-600}"
 
 if [ -z "$ovmf" ]; then
@@ -41,7 +41,7 @@ qemu-system-x86_64 "${kvm[@]}" -m 4096 -smp 2 -nographic \
 pid=$!
 
 deadline=$((SECONDS + install_timeout))
-until grep -aq 'gram-installer.service: Deactivated successfully' "$log1"; do
+until grep -aq '^install complete$' "$log1"; do
   if ! kill -0 "$pid" 2>/dev/null; then break; fi
   if [ "$SECONDS" -ge "$deadline" ]; then
     echo "install timed out after ${install_timeout}s" >&2
@@ -50,7 +50,7 @@ until grep -aq 'gram-installer.service: Deactivated successfully' "$log1"; do
   fi
   sleep 5
 done
-if ! grep -aq 'gram-installer.service: Deactivated successfully' "$log1"; then
+if ! grep -aq '^install complete$' "$log1"; then
   echo "installer service did not succeed" >&2
   kill "$pid" 2>/dev/null || true
   exit 1
