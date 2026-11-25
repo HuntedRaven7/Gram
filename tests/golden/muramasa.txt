@@ -1,15 +1,14 @@
 [dry-run] lsblk -J -d -o PATH,SIZE,TYPE,MODEL,SERIAL,TRAN,RM,MOUNTPOINT
-dns check skipped in dry-run for ghcr.io
-pull image
-[dry-run] podman pull ghcr.io/huntedraven7/muramasa:testing
-release scratch filesystem
-[dry-run] umount /var/tmp
 wipe target disk
 [dry-run] wipefs --all --force /dev/vda
 scratch filesystem for pull
 [dry-run] mkfs.ext4 -F -L GRAMSCRATCH /dev/vda
 mount scratch for pull
-[dry-run] mount /dev/vda /var/tmp
+[dry-run] mount /dev/vda /var/lib/containers
+pull image
+[dry-run] podman pull ghcr.io/huntedraven7/muramasa:testing
+release scratch filesystem
+[dry-run] umount /var/lib/containers
 bootc install to-disk
 [dry-run] podman run --rm --privileged --pid=host -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/muramasa:testing bootc install to-disk --composefs-backend --wipe --filesystem btrfs --bootloader systemd --run-repart --karg=quiet --karg=systemd.machine_id=00000000-0000-4000-8000-000000000000 /dev/vda
 verify installed disk
