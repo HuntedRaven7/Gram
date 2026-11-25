@@ -8,7 +8,7 @@ permissions:
 jobs:
   secureboot-unlock:
     name: secureboot-unlock
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     steps:
       - name: Check out repository
