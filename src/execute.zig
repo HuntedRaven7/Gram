@@ -121,10 +121,18 @@ pub fn wipePartitions(allocator: std.mem.Allocator, r: *runner_mod.Runner, disk:
     }
 }
 
+fn traceLabel(r: *runner_mod.Runner, print: *const fn ([]const u8) void, buf: []u8, phase: []const u8, label: []const u8) !void {
+    const line = std.fmt.bufPrint(buf, "{s} {s}", .{ phase, label }) catch return;
+    try note(r, line);
+    print(line);
+}
+
 pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []plan_mod.Action, print: *const fn ([]const u8) void) !void {
+    var trace_buf: [256]u8 = undefined;
     for (actions) |action| {
         switch (action) {
             .command => |cmd| {
+                if (cmd.trace) try traceLabel(r, print, &trace_buf, "begin", cmd.label);
                 try note(r, cmd.label);
                 print(cmd.label);
                 const outcome = if (cmd.stdin) |input|
@@ -132,9 +140,12 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
                 else
                     r.run(cmd.argv);
                 outcome catch |err| {
+                    if (cmd.trace) try traceLabel(r, print, &trace_buf, "end", cmd.label);
                     if (!cmd.allow_fail) return err;
                     print("step failed, continuing");
+                    continue;
                 };
+                if (cmd.trace) try traceLabel(r, print, &trace_buf, "end", cmd.label);
             },
             .write_file => |wf| {
                 try note(r, wf.label);
@@ -162,4 +173,9 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
 
 pub fn printStdout(line: []const u8) void {
     std.debug.print("{s}\n", .{line});
+    const io = std.Options.debug_io;
+    const console = std.Io.Dir.openFileAbsolute(io, "/dev/console", .{ .mode = .write_only }) catch return;
+    defer console.close(io);
+    console.writeStreamingAll(io, line) catch return;
+    console.writeStreamingAll(io, "\n") catch return;
 }
