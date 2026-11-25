@@ -567,7 +567,7 @@ test "bootc install leaves state partition creation to first boot" {
                     "--composefs-backend",
                     "--wipe",
                     "--filesystem",
-                    "btrfs",
+                    "ext4",
                     "--bootloader",
                     "systemd",
                     "--karg=systemd.firstboot=no",
