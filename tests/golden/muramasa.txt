@@ -1,4 +1,6 @@
 [dry-run] lsblk -J -d -o PATH,SIZE,TYPE,MODEL,SERIAL,TRAN,RM,MOUNTPOINT
+warning: could not resolve image tag to a digest in dry-run
+resolved image: ghcr.io/huntedraven7/muramasa:testing
 wipe target disk
 [dry-run] wipefs --all --force /dev/vda
 scratch filesystem for pull
