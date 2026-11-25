@@ -74,7 +74,6 @@ The TUI has no direct flag for secrets. It reads the same config defaults, then 
 - `src/execute.zig`, `src/verify.zig`: system actions and post-install checks.
 - `src/disk.zig`, `src/cli.zig`, `src/tui.zig`: disk parsing, headless flow, Zigzag wizard.
 - `scripts/build-iso.sh`, `iso/gram-installer.service`: live ISO build and autostart.
-- `.audit/`: decision trail for this run.
 
 ## Decisions
 
