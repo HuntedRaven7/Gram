@@ -5,6 +5,7 @@ pub const Config = struct {
     profile: profile_mod.Id = .mjolnir,
     image: []const u8 = "",
     disk: []const u8 = "",
+    scratch_disk: []const u8 = "",
     ssid: []const u8 = "",
     psk: []const u8 = "",
     registry_user: []const u8 = "",
@@ -25,6 +26,7 @@ const Json = struct {
     profile: ?[]const u8 = null,
     image: ?[]const u8 = null,
     disk: ?[]const u8 = null,
+    scratchDisk: ?[]const u8 = null,
     ssid: ?[]const u8 = null,
     psk: ?[]const u8 = null,
     registryUser: ?[]const u8 = null,
@@ -70,6 +72,7 @@ pub fn fromJson(allocator: std.mem.Allocator, text: []const u8) !Config {
     }
     c.image = try keep(allocator, j.image, c.image);
     c.disk = try keep(allocator, j.disk, c.disk);
+    c.scratch_disk = try keep(allocator, j.scratchDisk, c.scratch_disk);
     c.ssid = try keep(allocator, j.ssid, c.ssid);
     c.psk = try keep(allocator, j.psk, c.psk);
     c.registry_user = try keep(allocator, j.registryUser, c.registry_user);
@@ -132,12 +135,14 @@ pub fn secret(
 
 test "json config with camelCase keys" {
     const text =
-        \\{"profile":"muramasa","disk":"/dev/vda","encrypted":true,"registryUser":"bot","sshKeys":["ssh-ed25519 AAAA"]}
+        \\{"profile":"muramasa","disk":"/dev/vda","scratchDisk":"/dev/vdb","encrypted":true,"registryUser":"bot","sshKeys":["ssh-ed25519 AAAA"]}
     ;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const c = try fromJson(arena.allocator(), text);
     try std.testing.expectEqual(profile_mod.Id.muramasa, c.profile);
+    try std.testing.expectEqualStrings("/dev/vda", c.disk);
+    try std.testing.expectEqualStrings("/dev/vdb", c.scratch_disk);
     try std.testing.expect(c.encrypt);
     try std.testing.expectEqualStrings("ghcr.io/huntedraven7/muramasa:testing", c.image);
     try std.testing.expectEqualStrings("bot", c.registry_user);

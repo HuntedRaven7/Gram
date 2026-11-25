@@ -104,6 +104,7 @@ fn keyfile(allocator: std.mem.Allocator, ssid: []const u8, psk: []const u8) ![]c
 
 pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []const u8) !Plan {
     const p = profile_mod.get(c.profile);
+    const scratch = if (c.scratch_disk.len != 0) c.scratch_disk else c.disk;
     var actions: std.ArrayListUnmanaged(Action) = .empty;
     errdefer actions.deinit(allocator);
 
@@ -134,20 +135,20 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
 
     try actions.append(allocator, .{ .command = .{
         .label = "wipe target disk",
-        .argv = try dupeArgv(allocator, &.{ "wipefs", "--all", "--force", c.disk }),
+        .argv = try dupeArgv(allocator, &.{ "wipefs", "--all", "--force", scratch }),
     } });
     try actions.append(allocator, .{ .command = .{
         .label = "scratch filesystem for pull",
-        .argv = try dupeArgv(allocator, &.{ "mkfs.ext4", "-F", "-L", "GRAMSCRATCH", c.disk }),
+        .argv = try dupeArgv(allocator, &.{ "mkfs.ext4", "-F", "-L", "GRAMSCRATCH", scratch }),
     } });
     try actions.append(allocator, .{ .command = .{
         .label = "mount scratch for pull",
-        .argv = try dupeArgv(allocator, &.{ "mount", c.disk, container_root }),
+        .argv = try dupeArgv(allocator, &.{ "mount", scratch, container_root }),
         .trace = true,
     } });
     try actions.append(allocator, .{ .command = .{
         .label = "mount scratch at /var/tmp for pull",
-        .argv = try dupeArgv(allocator, &.{ "mount", c.disk, scratch_tmp }),
+        .argv = try dupeArgv(allocator, &.{ "mount", scratch, scratch_tmp }),
         .trace = true,
     } });
     try actions.append(allocator, .{ .command = .{
@@ -213,10 +214,9 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         .label = "bootc install to-disk",
         .argv = try bootc_args.toOwnedSlice(allocator),
     } });
-    // The pulled image lives on the scratch filesystem. Keep every mount in
-    // place until bootc install has consumed it; releasing it earlier makes
+    // Release the scratch mounts only after install. Freeing them sooner makes
     // podman pull the image again into the RAM-backed live overlay and run out
-    // of space while unpacking.
+    // of space. The target disk stays unmounted, so bootc install can claim it.
     try actions.append(allocator, .{ .command = .{
         .label = "restore default container storage config",
         .argv = try dupeArgv(allocator, &.{ "rm", "-f", storage_conf_path }),
@@ -601,4 +601,45 @@ test "mounts, unmounts and pull are traced on the serial console" {
         };
         try std.testing.expect(found);
     }
+}
+
+test "configured scratch disk drives wipefs mkfs and mounts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    c.scratch_disk = "/dev/vdb";
+    const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
+
+    var saw_wipe = false;
+    var saw_mkfs = false;
+    var scratch_mounts: usize = 0;
+    var saw_install = false;
+    for (plan.actions) |action| switch (action) {
+        .command => |cmd| {
+            if (std.mem.eql(u8, cmd.label, "wipe target disk")) {
+                try expectArgv(cmd.argv, &.{ "wipefs", "--all", "--force", "/dev/vdb" });
+                saw_wipe = true;
+            } else if (std.mem.eql(u8, cmd.label, "scratch filesystem for pull")) {
+                try expectArgv(cmd.argv, &.{ "mkfs.ext4", "-F", "-L", "GRAMSCRATCH", "/dev/vdb" });
+                saw_mkfs = true;
+            } else if (std.mem.startsWith(u8, cmd.label, "mount scratch")) {
+                try std.testing.expectEqual(@as(usize, 3), cmd.argv.len);
+                try expectArgv(cmd.argv, &.{ "mount", "/dev/vdb", cmd.argv[2] });
+                try std.testing.expect(std.mem.eql(u8, cmd.argv[2], container_root) or std.mem.eql(u8, cmd.argv[2], scratch_tmp));
+                scratch_mounts += 1;
+            } else if (std.mem.eql(u8, cmd.label, "bootc install to-disk")) {
+                try std.testing.expectEqualStrings("/dev/vda", cmd.argv[cmd.argv.len - 1]);
+                saw_install = true;
+            }
+        },
+        else => {},
+    };
+
+    try std.testing.expect(saw_wipe);
+    try std.testing.expect(saw_mkfs);
+    try std.testing.expectEqual(@as(usize, 2), scratch_mounts);
+    try std.testing.expect(saw_install);
 }
