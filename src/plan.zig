@@ -43,6 +43,7 @@ pub const Plan = struct {
 
 const container_root = "/var/lib/containers";
 const container_runroot = "/var/lib/containers/runroot";
+const scratch_tmp = "/var/tmp";
 const storage_conf_path = "/etc/containers/storage.conf";
 const storage_conf_content =
     \\[storage]
@@ -131,6 +132,10 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         .argv = try dupeArgv(allocator, &.{ "mount", c.disk, container_root }),
     } });
     try actions.append(allocator, .{ .command = .{
+        .label = "mount scratch at /var/tmp for pull",
+        .argv = try dupeArgv(allocator, &.{ "mount", c.disk, scratch_tmp }),
+    } });
+    try actions.append(allocator, .{ .command = .{
         .label = "create container runroot on scratch",
         .argv = try dupeArgv(allocator, &.{ "mkdir", "-p", container_runroot }),
     } });
@@ -147,6 +152,10 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
     try actions.append(allocator, .{ .command = .{
         .label = "restore default container storage config",
         .argv = try dupeArgv(allocator, &.{ "rm", "-f", storage_conf_path }),
+    } });
+    try actions.append(allocator, .{ .command = .{
+        .label = "release scratch from /var/tmp",
+        .argv = try dupeArgv(allocator, &.{ "umount", scratch_tmp }),
     } });
     try actions.append(allocator, .{ .command = .{
         .label = "release scratch filesystem",
@@ -333,4 +342,50 @@ test "runroot config keeps podman state on the scratch filesystem" {
     try std.testing.expect(config_index.? < pull_index.?);
     try std.testing.expect(pull_index.? < restore_index.?);
     try std.testing.expect(restore_index.? < unmount_index.?);
+}
+
+test "scratch covers container storage and var tmp around the pull" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
+
+    var container_mount: ?usize = null;
+    var tmp_mount: ?usize = null;
+    var pull_index: ?usize = null;
+    var tmp_unmount: ?usize = null;
+    var container_unmount: ?usize = null;
+    var install_index: ?usize = null;
+    for (plan.actions, 0..) |action, i| switch (action) {
+        .command => |cmd| {
+            if (cmd.argv.len == 3 and std.mem.eql(u8, cmd.argv[0], "mount") and std.mem.eql(u8, cmd.argv[1], c.disk)) {
+                if (std.mem.eql(u8, cmd.argv[2], container_root)) container_mount = i;
+                if (std.mem.eql(u8, cmd.argv[2], scratch_tmp)) tmp_mount = i;
+            } else if (cmd.argv.len == 2 and std.mem.eql(u8, cmd.argv[0], "umount")) {
+                if (std.mem.eql(u8, cmd.argv[1], container_root)) container_unmount = i;
+                if (std.mem.eql(u8, cmd.argv[1], scratch_tmp)) tmp_unmount = i;
+            } else if (std.mem.eql(u8, cmd.label, "pull image")) {
+                pull_index = i;
+            } else if (std.mem.eql(u8, cmd.label, "bootc install to-disk")) {
+                install_index = i;
+            }
+        },
+        else => {},
+    };
+
+    try std.testing.expect(container_mount != null);
+    try std.testing.expect(tmp_mount != null);
+    try std.testing.expect(pull_index != null);
+    try std.testing.expect(tmp_unmount != null);
+    try std.testing.expect(container_unmount != null);
+    try std.testing.expect(install_index != null);
+    try std.testing.expect(container_mount.? < pull_index.?);
+    try std.testing.expect(tmp_mount.? < pull_index.?);
+    try std.testing.expect(pull_index.? < tmp_unmount.?);
+    try std.testing.expect(pull_index.? < container_unmount.?);
+    try std.testing.expect(tmp_unmount.? < install_index.?);
+    try std.testing.expect(container_unmount.? < install_index.?);
 }
