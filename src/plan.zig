@@ -119,27 +119,22 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         .label = "pull image",
         .argv = try dupeArgv(allocator, &.{ "podman", "pull", c.image }),
     } });
+    try actions.append(allocator, .{ .command = .{
+        .label = "release scratch filesystem",
+        .argv = try dupeArgv(allocator, &.{ "umount", "/var/tmp" }),
+    } });
 
     try actions.append(allocator, .{ .command = .{
         .label = "wipe target disk",
         .argv = try dupeArgv(allocator, &.{ "wipefs", "--all", "--force", c.disk }),
     } });
     try actions.append(allocator, .{ .command = .{
-        .label = "temporary swap for pull",
-        .argv = try dupeArgv(allocator, &.{ "mkswap", "-f", c.disk }),
+        .label = "scratch filesystem for pull",
+        .argv = try dupeArgv(allocator, &.{ "mkfs.ext4", "-F", "-L", "GRAMSCRATCH", c.disk }),
     } });
     try actions.append(allocator, .{ .command = .{
-        .label = "enable temporary swap",
-        .argv = try dupeArgv(allocator, &.{ "swapon", c.disk }),
-    } });
-    try actions.append(allocator, .{ .command = .{
-        .label = "grow tmpfs for overlay",
-        .argv = try dupeArgv(allocator, &.{ "mount", "-o", "remount,size=8G", "/run" }),
-        .allow_fail = true,
-    } });
-    try actions.append(allocator, .{ .command = .{
-        .label = "release temporary swap",
-        .argv = try dupeArgv(allocator, &.{ "swapoff", c.disk }),
+        .label = "mount scratch for pull",
+        .argv = try dupeArgv(allocator, &.{ "mount", c.disk, "/var/tmp" }),
     } });
 
     var bootc_args: std.ArrayListUnmanaged([]const u8) = .empty;
