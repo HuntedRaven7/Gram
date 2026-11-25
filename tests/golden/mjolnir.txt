@@ -16,9 +16,13 @@ mount scratch at /var/tmp for pull
 [dry-run] mount /dev/vda /var/tmp
 create container runroot on scratch
 [dry-run] mkdir -p /var/lib/containers/runroot
+create container root on scratch
+[dry-run] mkdir -p /var/lib/containers/root
 point container storage at scratch
+check free space before pull
+[dry-run] df -h /var/tmp /var/lib/containers /run
 pull image
-[dry-run] podman pull ghcr.io/huntedraven7/mjolnir:testing
+[dry-run] env TMPDIR=/var/tmp podman --root /var/lib/containers/root --runroot /var/lib/containers/runroot pull ghcr.io/huntedraven7/mjolnir:testing
 restore default container storage config
 [dry-run] rm -f /etc/containers/storage.conf
 release scratch from /var/tmp
