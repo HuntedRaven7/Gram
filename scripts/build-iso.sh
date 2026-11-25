@@ -6,7 +6,7 @@ BUILD="$ROOT/build/iso"
 OUT="$ROOT/dist"
 ARCH="${ARCH:-amd64}"
 ZIG="${ZIG:-zig}"
-BASE_IMAGE="${BASE_IMAGE:-quay.io/fedora/fedora-bootc@sha256:840da31a3e3e8055a8d1c8c0f378e66e5c7de6ebe39037bbf7e5b252f138f04d}"
+BASE_IMAGE="${BASE_IMAGE:-quay.io/fedora/fedora-bootc@sha256:990d12782083cc1e40e1b428fa38ef7a55464faca9a5820f469092e31f63d152}"
 BOOT_EFI="$([ "$ARCH" = arm64 ] && echo BOOTAA64.EFI || echo BOOTX64.EFI)"
 
 for tool in "$ZIG" podman mformat mcopy mmd mksquashfs xorriso tar; do
