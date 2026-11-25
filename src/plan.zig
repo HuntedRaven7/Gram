@@ -23,7 +23,12 @@ pub const PersistWifi = struct {
     ssid: []const u8,
     psk: []const u8,
     state_label: ?[]const u8,
-    required: bool,
+};
+
+pub const PersistMachineId = struct {
+    label: []const u8,
+    machine_id: []const u8,
+    state_label: ?[]const u8,
 };
 
 pub const PersistMachineId = struct {
@@ -201,7 +206,6 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         p.filesystem,
         "--bootloader",
         p.bootloader,
-        "--run-repart",
     });
     if (p.id != .mjolnir) {
         for (p.kargs) |karg| {
@@ -237,7 +241,6 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
             .label = "persist machine ID in target state partition",
             .machine_id = machine_id,
             .state_label = p.state_label,
-            .required = p.state_label != null,
         } });
     }
 
@@ -247,7 +250,6 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
             .ssid = c.ssid,
             .psk = c.psk,
             .state_label = p.state_label,
-            .required = p.state_label != null,
         } });
     }
 
@@ -540,6 +542,57 @@ test "bootc install reuses the storage the pull populated" {
     try std.testing.expectEqualStrings(container_runroot, pull_runroot.?);
     try std.testing.expectEqualStrings(pull_root.?, install_root.?);
     try std.testing.expectEqualStrings(pull_runroot.?, install_runroot.?);
+}
+
+test "bootc install leaves state partition creation to first boot" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
+
+    var found = false;
+    for (plan.actions) |action| switch (action) {
+        .command => |cmd| {
+            if (std.mem.eql(u8, cmd.label, "bootc install to-disk")) {
+                found = true;
+                try expectArgv(cmd.argv, &.{
+                    "podman",
+                    "run",
+                    "--rm",
+                    "--privileged",
+                    "--pid=host",
+                    "--root",
+                    container_graphroot,
+                    "--runroot",
+                    container_runroot,
+                    "-v",
+                    "/dev:/dev",
+                    "--tmpfs",
+                    "/run/udev",
+                    "-v",
+                    "/var/lib/containers:/var/lib/containers",
+                    "--security-opt",
+                    "label=type:unconfined_t",
+                    "ghcr.io/huntedraven7/mjolnir:testing",
+                    "bootc",
+                    "install",
+                    "to-disk",
+                    "--composefs-backend",
+                    "--wipe",
+                    "--filesystem",
+                    "btrfs",
+                    "--bootloader",
+                    "systemd",
+                    "/dev/vda",
+                });
+            }
+        },
+        else => {},
+    };
+    try std.testing.expect(found);
 }
 
 fn graphrootFrom(content: []const u8) ?[]const u8 {

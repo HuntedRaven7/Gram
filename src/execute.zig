@@ -66,12 +66,10 @@ fn writeToState(
     content: []const u8,
     mode: u32,
     state_label: ?[]const u8,
-    required: bool,
     warning: []const u8,
 ) !void {
     if (r.dry_run) return;
     const dev = (try findState(allocator, r, state_label)) orelse {
-        if (required) return error.StatePartitionNotFound;
         try r.record(try std.fmt.allocPrint(allocator, "warning: {s}\n", .{warning}));
         return;
     };
@@ -108,12 +106,12 @@ pub fn persistWifi(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: plan_
         \\method=auto
         \\
     , .{ p.ssid, p.psk });
-    try writeToState(allocator, r, "etc/NetworkManager/system-connections/gram-wifi.nmconnection", content, 0o600, p.state_label, p.required, "no state partition found, WiFi profile not persisted");
+    try writeToState(allocator, r, "etc/NetworkManager/system-connections/gram-wifi.nmconnection", content, 0o600, p.state_label, "no state partition found, WiFi profile not persisted");
 }
 
 pub fn persistMachineId(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: plan_mod.PersistMachineId) !void {
     const content = try std.fmt.allocPrint(allocator, "{s}\n", .{p.machine_id});
-    try writeToState(allocator, r, "etc/machine-id", content, 0o444, p.state_label, p.required, "no state partition found, machine ID not persisted");
+    try writeToState(allocator, r, "etc/machine-id", content, 0o444, p.state_label, "no state partition found, machine ID not persisted");
 }
 
 fn note(r: *runner_mod.Runner, text: []const u8) !void {
