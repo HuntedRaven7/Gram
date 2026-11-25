@@ -42,6 +42,7 @@ pub const Plan = struct {
 };
 
 const container_root = "/var/lib/containers";
+const container_graphroot = "/var/lib/containers/root";
 const container_runroot = "/var/lib/containers/runroot";
 const scratch_tmp = "/var/tmp";
 const storage_conf_path = "/etc/containers/storage.conf";
@@ -139,15 +140,28 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         .label = "create container runroot on scratch",
         .argv = try dupeArgv(allocator, &.{ "mkdir", "-p", container_runroot }),
     } });
+    try actions.append(allocator, .{ .command = .{
+        .label = "create container root on scratch",
+        .argv = try dupeArgv(allocator, &.{ "mkdir", "-p", container_graphroot }),
+    } });
     try actions.append(allocator, .{ .write_file = .{
         .label = "point container storage at scratch",
         .path = storage_conf_path,
         .content = storage_conf_content,
     } });
+    try actions.append(allocator, .{ .command = .{
+        .label = "check free space before pull",
+        .argv = try dupeArgv(allocator, &.{ "df", "-h", scratch_tmp, container_root, "/run" }),
+    } });
 
+    const pull_tmpdir = try std.fmt.allocPrint(allocator, "TMPDIR={s}", .{scratch_tmp});
     try actions.append(allocator, .{ .command = .{
         .label = "pull image",
-        .argv = try dupeArgv(allocator, &.{ "podman", "pull", c.image }),
+        .argv = try dupeArgv(allocator, &.{
+            "env",               pull_tmpdir, "podman",          "--root",
+            container_graphroot, "--runroot", container_runroot, "pull",
+            c.image,
+        }),
     } });
     try actions.append(allocator, .{ .command = .{
         .label = "restore default container storage config",
@@ -388,4 +402,59 @@ test "scratch covers container storage and var tmp around the pull" {
     try std.testing.expect(pull_index.? < container_unmount.?);
     try std.testing.expect(tmp_unmount.? < install_index.?);
     try std.testing.expect(container_unmount.? < install_index.?);
+}
+
+fn expectArgv(actual: []const []const u8, expected: []const []const u8) !void {
+    try std.testing.expectEqual(expected.len, actual.len);
+    for (expected, actual) |want, got| try std.testing.expectEqualStrings(want, got);
+}
+
+test "pull runs explicitly on scratch paths with TMPDIR set" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
+
+    var root_dir_index: ?usize = null;
+    var runroot_dir_index: ?usize = null;
+    var df_index: ?usize = null;
+    var pull_index: ?usize = null;
+    for (plan.actions, 0..) |action, i| switch (action) {
+        .command => |cmd| {
+            if (std.mem.eql(u8, cmd.label, "create container root on scratch")) {
+                root_dir_index = i;
+                try expectArgv(cmd.argv, &.{ "mkdir", "-p", container_graphroot });
+            } else if (std.mem.eql(u8, cmd.label, "create container runroot on scratch")) {
+                runroot_dir_index = i;
+            } else if (std.mem.eql(u8, cmd.label, "check free space before pull")) {
+                df_index = i;
+                try expectArgv(cmd.argv, &.{ "df", "-h", scratch_tmp, container_root, "/run" });
+            } else if (std.mem.eql(u8, cmd.label, "pull image")) {
+                pull_index = i;
+                try expectArgv(cmd.argv, &.{
+                    "env",
+                    "TMPDIR=/var/tmp",
+                    "podman",
+                    "--root",
+                    container_graphroot,
+                    "--runroot",
+                    container_runroot,
+                    "pull",
+                    c.image,
+                });
+            }
+        },
+        else => {},
+    };
+
+    try std.testing.expect(root_dir_index != null);
+    try std.testing.expect(runroot_dir_index != null);
+    try std.testing.expect(df_index != null);
+    try std.testing.expect(pull_index != null);
+    try std.testing.expect(root_dir_index.? < pull_index.?);
+    try std.testing.expect(runroot_dir_index.? < pull_index.?);
+    try std.testing.expect(df_index.? < pull_index.?);
 }
