@@ -5,6 +5,8 @@ scratch filesystem for pull
 [dry-run] mkfs.ext4 -F -L GRAMSCRATCH /dev/vda
 mount scratch for pull
 [dry-run] mount /dev/vda /var/lib/containers
+mount scratch at /var/tmp for pull
+[dry-run] mount /dev/vda /var/tmp
 create container runroot on scratch
 [dry-run] mkdir -p /var/lib/containers/runroot
 point container storage at scratch
@@ -12,6 +14,8 @@ pull image
 [dry-run] podman pull ghcr.io/huntedraven7/muramasa:testing
 restore default container storage config
 [dry-run] rm -f /etc/containers/storage.conf
+release scratch from /var/tmp
+[dry-run] umount /var/tmp
 release scratch filesystem
 [dry-run] umount /var/lib/containers
 clear signatures in existing partitions
