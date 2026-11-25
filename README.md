@@ -49,10 +49,10 @@ The RPM packages installed by `dnf` during the ISO build are not tracked. They f
 
 A profile owns the image reference, filesystem, bootloader, minimum disk size, kernel arguments, and the expected state partition label.
 
-- `mjolnir` uses `ghcr.io/huntedraven7/mjolnir:testing`, btrfs, systemd-boot, a signed UKI, and the `MjolnirState` partition. It adds the volatile-root kargs from the Mjolnir image.
+- `mjolnir` uses `ghcr.io/huntedraven7/mjolnir:testing`, ext4, systemd-boot, a signed UKI, and the `MjolnirState` partition. It adds the volatile-root kargs from the Mjolnir image.
 - `muramasa` uses `ghcr.io/huntedraven7/muramasa:testing` and the same install mechanics. Its exact state layout is not published, so Gram accepts any partition with a label ending in `State` and warns when it finds none.
 
-Both profiles call `podman run --privileged ... bootc install to-disk --composefs-backend --filesystem btrfs --bootloader systemd --wipe`. Gram leaves out `--run-repart`. The live ISO's systemd-repart cannot parse the target image's `Type=state` definition. The installed image creates its state partition on first boot with its own systemd-repart. Gram still verifies the ESP, the UKI, the systemd-boot loader, and the root filesystem before it reports success.
+Both profiles call `podman run --privileged ... bootc install to-disk --composefs-backend --bootloader systemd --wipe`, with `--filesystem` taken from the profile. Mjolnir uses ext4 because its pinned image ships `mkfs.ext4` but no `mkfs.btrfs` and bootc runs mkfs inside the target image; Muramasa keeps btrfs. Gram leaves out `--run-repart`. The live ISO's systemd-repart cannot parse the target image's `Type=state` definition. The installed image creates its state partition on first boot with its own systemd-repart. Gram still verifies the ESP, the UKI, the systemd-boot loader, and the root filesystem before it reports success.
 
 ## Headless mode
 
