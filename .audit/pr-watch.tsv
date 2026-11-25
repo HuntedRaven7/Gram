@@ -8,3 +8,4 @@ time	pr	head_sha	failing_job	cause	fix_commit	status
 2026-11-25T02:20	33	5ccac0e9721dcb42ce81f57067d5b0eae35eed2a	vm-boot run 45525068258	vm-test.sh still uses -bios with Ubuntu 4M OVMF so QEMU never booted	28f7147
 2026-11-25T03:35	28	7515d22eb6b4cb61fe56d0b857adb689f06c19c7	full-install run 45534731419	branch missed 79e6119; vm-install-test.sh still uses -bios with Ubuntu 4M OVMF	976f6a0
 2026-11-25T03:55	29	779c8c27108c5a92bbc1afa48de334ffa45ab782	full-install run 45534547959	base lacks PR34 observability and scratch filesystem so podman pull fills /var/tmp and no completion marker reaches serial	decc1f1
+2026-11-25T04:10	34	cde92b7500025a7dffafc87d1bba70904c067dca	full-install run 45534571265	podman unpack wrote /usr/bin/ctr into /var/lib/containers/storage/overlay with no space left; scratch was mounted only at /var/tmp	7d238fd
