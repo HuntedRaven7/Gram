@@ -116,15 +116,6 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
     } });
 
     try actions.append(allocator, .{ .command = .{
-        .label = "pull image",
-        .argv = try dupeArgv(allocator, &.{ "podman", "pull", c.image }),
-    } });
-    try actions.append(allocator, .{ .command = .{
-        .label = "release scratch filesystem",
-        .argv = try dupeArgv(allocator, &.{ "umount", "/var/tmp" }),
-    } });
-
-    try actions.append(allocator, .{ .command = .{
         .label = "wipe target disk",
         .argv = try dupeArgv(allocator, &.{ "wipefs", "--all", "--force", c.disk }),
     } });
@@ -134,7 +125,16 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
     } });
     try actions.append(allocator, .{ .command = .{
         .label = "mount scratch for pull",
-        .argv = try dupeArgv(allocator, &.{ "mount", c.disk, "/var/tmp" }),
+        .argv = try dupeArgv(allocator, &.{ "mount", c.disk, "/var/lib/containers" }),
+    } });
+
+    try actions.append(allocator, .{ .command = .{
+        .label = "pull image",
+        .argv = try dupeArgv(allocator, &.{ "podman", "pull", c.image }),
+    } });
+    try actions.append(allocator, .{ .command = .{
+        .label = "release scratch filesystem",
+        .argv = try dupeArgv(allocator, &.{ "umount", "/var/lib/containers" }),
     } });
 
     var bootc_args: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -213,6 +213,50 @@ test "plan builds both profiles and keeps secrets out of argv" {
 test "registry derived from image" {
     try std.testing.expectEqualStrings("ghcr.io", registryFromImage("ghcr.io/huntedraven7/mjolnir:testing"));
     try std.testing.expectEqualStrings("docker.io", registryFromImage("fedora:latest"));
+}
+
+test "scratch disk mounts at container storage for the pull" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
+
+    var mount_index: ?usize = null;
+    var pull_index: ?usize = null;
+    var unmount_index: ?usize = null;
+    var install_index: ?usize = null;
+    for (plan.actions, 0..) |action, i| switch (action) {
+        .command => |cmd| {
+            if (std.mem.eql(u8, cmd.label, "mount scratch for pull")) {
+                mount_index = i;
+                try std.testing.expectEqual(@as(usize, 3), cmd.argv.len);
+                try std.testing.expectEqualStrings("mount", cmd.argv[0]);
+                try std.testing.expectEqualStrings(c.disk, cmd.argv[1]);
+                try std.testing.expectEqualStrings("/var/lib/containers", cmd.argv[2]);
+            } else if (std.mem.eql(u8, cmd.label, "pull image")) {
+                pull_index = i;
+            } else if (std.mem.eql(u8, cmd.label, "release scratch filesystem")) {
+                unmount_index = i;
+                try std.testing.expectEqual(@as(usize, 2), cmd.argv.len);
+                try std.testing.expectEqualStrings("umount", cmd.argv[0]);
+                try std.testing.expectEqualStrings("/var/lib/containers", cmd.argv[1]);
+            } else if (std.mem.eql(u8, cmd.label, "bootc install to-disk")) {
+                install_index = i;
+            }
+        },
+        else => {},
+    };
+
+    try std.testing.expect(mount_index != null);
+    try std.testing.expect(pull_index != null);
+    try std.testing.expect(unmount_index != null);
+    try std.testing.expect(install_index != null);
+    try std.testing.expect(mount_index.? < pull_index.?);
+    try std.testing.expect(pull_index.? < unmount_index.?);
+    try std.testing.expect(unmount_index.? < install_index.?);
 }
 
 test "signature verification uses profile identity before the pull" {
