@@ -21,7 +21,7 @@ mkdir -p "$BUILD"/{esp/EFI/BOOT,esp/loader/entries,esp/LiveOS,squashfs/etc,squas
 mkdir -p "$OUT"
 
 echo "==> building static installer"
-"$ZIG" build --prefix "$BUILD/gram-prefix" -Doptimize=ReleaseSafe
+"$ZIG" build --prefix "$BUILD/gram-prefix" -Doptimize=ReleaseSafe -Dcpu=baseline
 install -m 0755 "$BUILD/gram-prefix/bin/gram" "$BUILD/squashfs/usr/local/bin/gram"
 
 echo "==> staging live root from $BASE_IMAGE"
@@ -45,14 +45,20 @@ ln -sf ../gram-installer.service \
 
 if [ -n "${GRAM_CI_CONFIG:-}" ]; then
   install -Dm644 "$GRAM_CI_CONFIG" "$ROOTFS/etc/gram/install.json"
+  mkdir -p "$ROOTFS/usr/lib/systemd/journald.conf.d"
+  cat >"$ROOTFS/usr/lib/systemd/journald.conf.d/10-gram-ci.conf" <<'JOURNAL'
+[Journal]
+ForwardToConsole=yes
+ConsoleLevel=debug
+JOURNAL
   sed -i \
     -e 's|^ExecStart=.*|ExecStart=/usr/local/bin/gram --yes --config /etc/gram/install.json|' \
-    -e '/^TTYPath=/d' \
+    -e 's|^TTYPath=.*|TTYPath=/dev/ttyS0|' \
     -e '/^TTYReset=/d' \
     -e '/^TTYVHangup=/d' \
     -e 's|^StandardInput=.*|StandardInput=null|' \
-    -e 's|^StandardOutput=.*|StandardOutput=journal|' \
-    -e 's|^StandardError=.*|StandardError=journal|' \
+    -e 's|^StandardOutput=.*|StandardOutput=tty|' \
+    -e 's|^StandardError=.*|StandardError=tty|' \
     "$ROOTFS/usr/lib/systemd/system/gram-installer.service"
 fi
 
