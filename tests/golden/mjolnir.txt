@@ -8,10 +8,14 @@ wipe target disk
 [dry-run] wipefs --all --force /dev/vda
 scratch filesystem for pull
 [dry-run] mkfs.ext4 -F -L GRAMSCRATCH /dev/vda
+begin mount scratch for pull
 mount scratch for pull
 [dry-run] mount /dev/vda /var/lib/containers
+end mount scratch for pull
+begin mount scratch at /var/tmp for pull
 mount scratch at /var/tmp for pull
 [dry-run] mount /dev/vda /var/tmp
+end mount scratch at /var/tmp for pull
 create container runroot on scratch
 [dry-run] mkdir -p /var/lib/containers/runroot
 create container root on scratch
@@ -19,17 +23,22 @@ create container root on scratch
 point container storage at scratch
 check free space before pull
 [dry-run] df -h /var/tmp /var/lib/containers /run
+begin pull image
 pull image
 [dry-run] env TMPDIR=/var/tmp podman --root /var/lib/containers/root --runroot /var/lib/containers/runroot pull ghcr.io/huntedraven7/mjolnir:testing
+end pull image
+bootc install to-disk
+[dry-run] podman run --rm --privileged --pid=host --root /var/lib/containers/root --runroot /var/lib/containers/runroot -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir:testing bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem btrfs --bootloader systemd --run-repart --karg=systemd.firstboot=no --karg=quiet --karg=systemd.volatile=yes --karg=console=ttyS0,115200 --karg=systemd.machine_id=00000000-0000-4000-8000-000000000000 /dev/vda
 restore default container storage config
 [dry-run] rm -f /etc/containers/storage.conf
+begin release scratch from /var/tmp
 release scratch from /var/tmp
 [dry-run] umount /var/tmp
+end release scratch from /var/tmp
+begin release scratch filesystem
 release scratch filesystem
 [dry-run] umount /var/lib/containers
-bootc install to-disk
-[dry-run] podman run --rm --privileged --pid=host -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir:testing bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem btrfs --bootloader systemd --run-repart /dev/vda
-persist machine ID in target state partition
+end release scratch filesystem
 persist WiFi in target state partition
 verify installed disk
 [dry-run] install complete
