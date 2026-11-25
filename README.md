@@ -61,7 +61,7 @@ Both profiles call `podman run --privileged ... bootc install to-disk --composef
 ./zig-out/bin/gram --yes --config install.json
 ```
 
-`install.json` accepts the camelCase keys used by Mjolnir's installer, plus `profile`, `hostname`, `timezone`, `username`, `passwordHash`, and `sshKeys`. Secrets can come from systemd credentials under `CREDENTIALS_DIRECTORY`, `/run/credentials/gram.service/`, or `/run/credentials/@system/` instead of the JSON file.
+`install.json` accepts the camelCase keys used by Mjolnir's installer, plus `profile`, `hostname`, `timezone`, `username`, `passwordHash`, and `sshKeys`. Set `scratchDisk` to a separate device to hold the image pull; without it, the target disk is reused and stays mounted until bootc install finishes. Secrets can come from systemd credentials under `CREDENTIALS_DIRECTORY`, `/run/credentials/gram.service/`, or `/run/credentials/@system/` instead of the JSON file.
 
 The TUI has no direct flag for secrets. It reads the same config defaults, then asks for WiFi, registry identity, machine identity, disk, and a typed disk confirmation.
 
