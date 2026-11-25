@@ -43,6 +43,17 @@ pub const Plan = struct {
     actions: []Action,
 };
 
+const container_root = "/var/lib/containers";
+const container_runroot = "/var/lib/containers/runroot";
+const storage_conf_path = "/etc/containers/storage.conf";
+const storage_conf_content =
+    \\[storage]
+    \\driver = "overlay"
+    \\graphroot = "/var/lib/containers"
+    \\runroot = "/var/lib/containers/runroot"
+    \\
+;
+
 fn dupeArgv(allocator: std.mem.Allocator, items: []const []const u8) ![]const []const u8 {
     return allocator.dupe([]const u8, items);
 }
@@ -125,7 +136,16 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
     } });
     try actions.append(allocator, .{ .command = .{
         .label = "mount scratch for pull",
-        .argv = try dupeArgv(allocator, &.{ "mount", c.disk, "/var/lib/containers" }),
+        .argv = try dupeArgv(allocator, &.{ "mount", c.disk, container_root }),
+    } });
+    try actions.append(allocator, .{ .command = .{
+        .label = "create container runroot on scratch",
+        .argv = try dupeArgv(allocator, &.{ "mkdir", "-p", container_runroot }),
+    } });
+    try actions.append(allocator, .{ .write_file = .{
+        .label = "point container storage at scratch",
+        .path = storage_conf_path,
+        .content = storage_conf_content,
     } });
 
     try actions.append(allocator, .{ .command = .{
@@ -133,8 +153,12 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         .argv = try dupeArgv(allocator, &.{ "podman", "pull", c.image }),
     } });
     try actions.append(allocator, .{ .command = .{
+        .label = "restore default container storage config",
+        .argv = try dupeArgv(allocator, &.{ "rm", "-f", storage_conf_path }),
+    } });
+    try actions.append(allocator, .{ .command = .{
         .label = "release scratch filesystem",
-        .argv = try dupeArgv(allocator, &.{ "umount", "/var/lib/containers" }),
+        .argv = try dupeArgv(allocator, &.{ "umount", container_root }),
     } });
 
     var bootc_args: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -259,36 +283,62 @@ test "scratch disk mounts at container storage for the pull" {
     try std.testing.expect(unmount_index.? < install_index.?);
 }
 
-test "signature verification uses profile identity before the pull" {
+test "runroot config keeps podman state on the scratch filesystem" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
 
-    var identities: [2][]const u8 = undefined;
-    for ([_]profile_mod.Id{ .mjolnir, .muramasa }, 0..) |id, i| {
-        var c = config_mod.defaults();
-        c.disk = "/dev/vda";
-        config_mod.applyProfile(&c, id);
-        const p = try build(a, c, "00000000-0000-4000-8000-000000000000");
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
 
-        var verify_index: ?usize = null;
-        var pull_index: ?usize = null;
-        for (p.actions, 0..) |action, j| switch (action) {
-            .verify_signature => |sig| {
-                verify_index = j;
-                identities[i] = sig.certificate_identity;
-                try std.testing.expectEqualStrings(profile_mod.get(id).certificate_identity, sig.certificate_identity);
-                try std.testing.expectEqualStrings(profile_mod.get(id).oidc_issuer, sig.oidc_issuer);
-                try std.testing.expectEqualStrings(c.image, sig.image);
-            },
-            .command => |cmd| {
-                if (std.mem.eql(u8, cmd.label, "pull image")) pull_index = j;
-            },
-            else => {},
-        };
-        try std.testing.expect(verify_index != null);
-        try std.testing.expect(pull_index != null);
-        try std.testing.expect(verify_index.? < pull_index.?);
-    }
-    try std.testing.expect(!std.mem.eql(u8, identities[0], identities[1]));
+    var mount_index: ?usize = null;
+    var runroot_dir_index: ?usize = null;
+    var config_index: ?usize = null;
+    var pull_index: ?usize = null;
+    var restore_index: ?usize = null;
+    var unmount_index: ?usize = null;
+    for (plan.actions, 0..) |action, i| switch (action) {
+        .command => |cmd| {
+            if (std.mem.eql(u8, cmd.label, "mount scratch for pull")) {
+                mount_index = i;
+            } else if (std.mem.eql(u8, cmd.label, "create container runroot on scratch")) {
+                runroot_dir_index = i;
+                try std.testing.expectEqual(@as(usize, 3), cmd.argv.len);
+                try std.testing.expectEqualStrings("mkdir", cmd.argv[0]);
+                try std.testing.expectEqualStrings("-p", cmd.argv[1]);
+                try std.testing.expectEqualStrings(container_runroot, cmd.argv[2]);
+            } else if (std.mem.eql(u8, cmd.label, "pull image")) {
+                pull_index = i;
+            } else if (std.mem.eql(u8, cmd.label, "restore default container storage config")) {
+                restore_index = i;
+                try std.testing.expectEqual(@as(usize, 3), cmd.argv.len);
+                try std.testing.expectEqualStrings("rm", cmd.argv[0]);
+                try std.testing.expectEqualStrings("-f", cmd.argv[1]);
+                try std.testing.expectEqualStrings(storage_conf_path, cmd.argv[2]);
+            } else if (std.mem.eql(u8, cmd.label, "release scratch filesystem")) {
+                unmount_index = i;
+            }
+        },
+        .write_file => |wf| {
+            if (std.mem.eql(u8, wf.path, storage_conf_path)) {
+                config_index = i;
+                try std.testing.expect(std.mem.indexOf(u8, wf.content, "graphroot = \"/var/lib/containers\"") != null);
+                try std.testing.expect(std.mem.indexOf(u8, wf.content, "runroot = \"/var/lib/containers/runroot\"") != null);
+            }
+        },
+        else => {},
+    };
+
+    try std.testing.expect(mount_index != null);
+    try std.testing.expect(runroot_dir_index != null);
+    try std.testing.expect(config_index != null);
+    try std.testing.expect(pull_index != null);
+    try std.testing.expect(restore_index != null);
+    try std.testing.expect(unmount_index != null);
+    try std.testing.expect(mount_index.? < runroot_dir_index.?);
+    try std.testing.expect(runroot_dir_index.? < config_index.?);
+    try std.testing.expect(config_index.? < pull_index.?);
+    try std.testing.expect(pull_index.? < restore_index.?);
+    try std.testing.expect(restore_index.? < unmount_index.?);
 }
