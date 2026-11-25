@@ -62,8 +62,7 @@ fn findState(allocator: std.mem.Allocator, r: *runner_mod.Runner, expected: ?[]c
 pub fn persistWifi(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: plan_mod.PersistWifi) !void {
     if (r.dry_run) return;
     const dev = (try findState(allocator, r, p.state_label)) orelse {
-        if (p.required) return error.StatePartitionNotFound;
-        try r.record(try std.fmt.allocPrint(allocator, "warning: no state partition found, WiFi profile not persisted\n", .{}));
+        try r.record("warning: no state partition found, WiFi profile not persisted\n");
         return;
     };
     defer allocator.free(dev);
