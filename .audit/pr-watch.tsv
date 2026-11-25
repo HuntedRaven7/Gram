@@ -1,0 +1,8 @@
+time	pr	head_sha	failing_job	cause	fix_commit	status
+2026-11-24T20:11	all	shared	vm-boot/full-install	dead base digest, licensed gitleaks action, 4M OVMF via -bios	79e6119	pushed, awaiting CI rerun
+2026-11-25T02:20	25	38d5095b9a46a944f90ab7e0eabf22b3e37e0426	vm-boot run 45525100315	vm-test.sh still uses -bios with Ubuntu 4M OVMF so QEMU never booted	28f7147
+2026-11-25T02:20	26	ad4d99af4464efd34e8d4cd5e557c92d9c310539	vm-boot run 45525055043,45525068112	vm-test.sh still uses -bios with Ubuntu 4M OVMF so QEMU never booted	28f7147
+2026-11-25T02:20	27	13645eb0a13bdee5b7c187ed153bd13f64ada7c8	vm-boot run 45525069173	vm-test.sh still uses -bios with Ubuntu 4M OVMF so QEMU never booted	28f7147
+2026-11-25T02:20	29	9cc2bf5be80baca5d205652992ad24d787929b0b	vm-boot run 45525073885	vm-test.sh still uses -bios with Ubuntu 4M OVMF so QEMU never booted	28f7147
+2026-11-25T02:20	32	e5cc87c93e38d31250814a4c82292f3f1f7d4f1e	vm-boot run 45525071446	vm-test.sh still uses -bios with Ubuntu 4M OVMF so QEMU never booted	28f7147
+2026-11-25T02:20	33	5ccac0e9721dcb42ce81f57067d5b0eae35eed2a	vm-boot run 45525068258	vm-test.sh still uses -bios with Ubuntu 4M OVMF so QEMU never booted	28f7147
