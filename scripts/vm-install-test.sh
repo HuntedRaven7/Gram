@@ -64,6 +64,11 @@ pid=$!
 deadline=$((SECONDS + install_timeout))
 until grep -aq '^install complete$' "$log1"; do
   if ! kill -0 "$pid" 2>/dev/null; then break; fi
+  if grep -aqE 'gram-installer\.service: (Failed with result|Main process exited, code=exited, status=[1-9])' "$log1"; then
+    echo "gram-installer.service failed; log: $log1" >&2
+    kill "$pid" 2>/dev/null || true
+    exit 1
+  fi
   if [ "$SECONDS" -ge "$deadline" ]; then
     echo "install timed out after ${install_timeout}s" >&2
     kill "$pid" 2>/dev/null || true
