@@ -6,16 +6,14 @@ connect WiFi
 [dry-run] nmcli connection up gram-wifi
 pull image
 [dry-run] podman pull ghcr.io/huntedraven7/mjolnir:testing
+release scratch filesystem
+[dry-run] umount /var/tmp
 wipe target disk
 [dry-run] wipefs --all --force /dev/vda
-temporary swap for pull
-[dry-run] mkswap -f /dev/vda
-enable temporary swap
-[dry-run] swapon /dev/vda
-grow tmpfs for overlay
-[dry-run] mount -o remount,size=8G /run
-release temporary swap
-[dry-run] swapoff /dev/vda
+scratch filesystem for pull
+[dry-run] mkfs.ext4 -F -L GRAMSCRATCH /dev/vda
+mount scratch for pull
+[dry-run] mount /dev/vda /var/tmp
 bootc install to-disk
 [dry-run] podman run --rm --privileged --pid=host -v /dev:/dev -v /run/udev:/run/udev:ro -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir:testing bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem btrfs --bootloader systemd --run-repart --karg=systemd.firstboot=no --karg=quiet --karg=systemd.volatile=yes --karg=console=ttyS0,115200 --karg=systemd.machine_id=00000000-0000-4000-8000-000000000000 /dev/vda
 persist WiFi in target state partition
