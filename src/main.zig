@@ -38,7 +38,6 @@ fn writeErr(io: std.Io, text: []const u8) !void {
 
 fn run(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
-    execute.setIo(init.io);
     var it = std.process.Args.Iterator.init(init.minimal.args);
     defer it.deinit();
     var args: std.ArrayListUnmanaged([]const u8) = .empty;
