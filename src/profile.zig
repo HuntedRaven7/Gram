@@ -23,7 +23,6 @@ pub fn get(id: Id) Profile {
             .id = .mjolnir,
             .label = "Mjolnir server",
             .image = "ghcr.io/huntedraven7/mjolnir@sha256:949e1a019f9d8b86586af85af81c398bc51d1d3eb22b3b3ef0d9bd6850d33b22",
-            .image = "ghcr.io/huntedraven7/mjolnir:testing",
             // bootc runs mkfs inside the target image, which ships mkfs.ext4
             // but no mkfs.btrfs. bootc adds -O verity for ext4, which a strict
             // composefs UKI needs.

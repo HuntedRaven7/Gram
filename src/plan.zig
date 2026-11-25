@@ -552,7 +552,7 @@ test "bootc install leaves state partition creation to first boot" {
                     "/var/lib/containers:/var/lib/containers",
                     "--security-opt",
                     "label=type:unconfined_t",
-                    "ghcr.io/huntedraven7/mjolnir:testing",
+                    "ghcr.io/huntedraven7/mjolnir@sha256:949e1a019f9d8b86586af85af81c398bc51d1d3eb22b3b3ef0d9bd6850d33b22",
                     "bootc",
                     "install",
                     "to-disk",
