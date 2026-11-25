@@ -5,12 +5,6 @@ const verify_mod = @import("verify.zig");
 
 const state_mount = "/mnt/gram-state";
 
-var print_io: std.Io = undefined;
-
-pub fn setIo(io: std.Io) void {
-    print_io = io;
-}
-
 const Raw = struct {
     path: []const u8,
     type: []const u8,
@@ -167,9 +161,5 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
 }
 
 pub fn printStdout(line: []const u8) void {
-    var buffer: [4096]u8 = undefined;
-    var writer = std.Io.File.stdout().writer(print_io, &buffer);
-    writer.interface.writeAll(line) catch return;
-    writer.interface.writeAll("\n") catch return;
-    writer.interface.flush() catch {};
+    std.debug.print("{s}\n", .{line});
 }
