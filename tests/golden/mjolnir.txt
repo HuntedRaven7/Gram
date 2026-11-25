@@ -1,5 +1,4 @@
 [dry-run] lsblk -J -d -o PATH,SIZE,TYPE,MODEL,SERIAL,TRAN,RM,MOUNTPOINT
-resolved image: ghcr.io/huntedraven7/mjolnir@sha256:949e1a019f9d8b86586af85af81c398bc51d1d3eb22b3b3ef0d9bd6850d33b22
 write live WiFi profile
 reload NetworkManager
 [dry-run] nmcli connection reload
@@ -15,9 +14,13 @@ mount scratch at /var/tmp for pull
 [dry-run] mount /dev/vda /var/tmp
 create container runroot on scratch
 [dry-run] mkdir -p /var/lib/containers/runroot
+create container root on scratch
+[dry-run] mkdir -p /var/lib/containers/root
 point container storage at scratch
+check free space before pull
+[dry-run] df -h /var/tmp /var/lib/containers /run
 pull image
-[dry-run] podman pull ghcr.io/huntedraven7/mjolnir@sha256:949e1a019f9d8b86586af85af81c398bc51d1d3eb22b3b3ef0d9bd6850d33b22
+[dry-run] env TMPDIR=/var/tmp podman --root /var/lib/containers/root --runroot /var/lib/containers/runroot pull ghcr.io/huntedraven7/mjolnir:testing
 restore default container storage config
 [dry-run] rm -f /etc/containers/storage.conf
 release scratch from /var/tmp
@@ -25,7 +28,7 @@ release scratch from /var/tmp
 release scratch filesystem
 [dry-run] umount /var/lib/containers
 bootc install to-disk
-[dry-run] podman run --rm --privileged --pid=host -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir@sha256:949e1a019f9d8b86586af85af81c398bc51d1d3eb22b3b3ef0d9bd6850d33b22 bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem btrfs --bootloader systemd --run-repart --karg=systemd.firstboot=no --karg=quiet --karg=systemd.volatile=yes --karg=console=ttyS0,115200 --karg=systemd.machine_id=00000000-0000-4000-8000-000000000000 /dev/vda
+[dry-run] podman run --rm --privileged --pid=host -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir:testing bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem btrfs --bootloader systemd --run-repart --karg=systemd.firstboot=no --karg=quiet --karg=systemd.volatile=yes --karg=console=ttyS0,115200 --karg=systemd.machine_id=00000000-0000-4000-8000-000000000000 /dev/vda
 persist WiFi in target state partition
 verify installed disk
 [dry-run] install complete
