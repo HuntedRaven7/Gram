@@ -14,6 +14,7 @@ pull image
 [dry-run] podman pull ghcr.io/huntedraven7/mjolnir:testing
 release scratch filesystem
 [dry-run] umount /var/lib/containers
+clear signatures in existing partitions
 bootc install to-disk
 [dry-run] podman run --rm --privileged --pid=host -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir:testing bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem btrfs --bootloader systemd --run-repart --karg=systemd.firstboot=no --karg=quiet --karg=systemd.volatile=yes --karg=console=ttyS0,115200 --karg=systemd.machine_id=00000000-0000-4000-8000-000000000000 /dev/vda
 persist WiFi in target state partition
