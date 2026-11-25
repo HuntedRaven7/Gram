@@ -28,7 +28,11 @@ pull image
 [dry-run] env TMPDIR=/var/tmp podman --root /var/lib/containers/storage --runroot /var/lib/containers/runroot pull ghcr.io/huntedraven7/mjolnir:testing
 end pull image
 bootc install to-disk
+<<<<<<< HEAD
 [dry-run] podman run --rm --privileged --pid=host --root /var/lib/containers/storage --runroot /var/lib/containers/runroot -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir:testing bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem btrfs --bootloader systemd /dev/vda
+=======
+[dry-run] podman run --rm --privileged --pid=host --root /var/lib/containers/storage --runroot /var/lib/containers/runroot -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir:testing bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem ext4 --bootloader systemd --karg=systemd.firstboot=no --karg=quiet --karg=systemd.volatile=yes --karg=console=ttyS0,115200 --karg=systemd.machine_id=00000000-0000-4000-8000-000000000000 /dev/vda
+>>>>>>> origin/feat/zig-bootc-installer
 restore default container storage config
 [dry-run] rm -f /etc/containers/storage.conf
 begin release scratch from /var/tmp
