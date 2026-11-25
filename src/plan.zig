@@ -31,13 +31,6 @@ pub const PersistMachineId = struct {
     state_label: ?[]const u8,
 };
 
-pub const PersistMachineId = struct {
-    label: []const u8,
-    machine_id: []const u8,
-    state_label: ?[]const u8,
-    required: bool,
-};
-
 pub const Verify = struct {
     label: []const u8,
     disk: []const u8,
