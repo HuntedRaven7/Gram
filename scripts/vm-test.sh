@@ -24,9 +24,27 @@ timeout_s="${TIMEOUT:-120}"
   exit 1
 }
 
+vars_source="${OVMF_VARS:-}"
+if [ -z "$vars_source" ]; then
+  for candidate in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd /usr/share/edk2/ovmf/OVMF_VARS.fd; do
+    if [ -f "$candidate" ]; then
+      vars_source="$candidate"
+      break
+    fi
+  done
+fi
+vars="${VARS:-/tmp/gram-vm-test-vars.fd}"
+if [ -n "$vars_source" ]; then
+  cp "$vars_source" "$vars"
+else
+  truncate -s 128K "$vars"
+fi
+
 qemu-img create -f qcow2 "$disk" 32G >/dev/null
 timeout "${timeout_s}s" qemu-system-x86_64 \
-  -m 2048 -smp 2 -nographic -bios "$ovmf" \
+  -m 2048 -smp 2 -nographic \
+  -drive "if=pflash,format=raw,readonly=on,file=$ovmf" \
+  -drive "if=pflash,format=raw,file=$vars" \
   -cdrom "$iso" -drive "file=$disk,if=virtio,format=qcow2" \
   -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
   -serial mon:stdio >"$log" 2>&1 || true
