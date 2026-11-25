@@ -1,0 +1,2 @@
+time	pr	head_sha	failing_job	cause	fix_commit	status
+2026-11-24T20:11	all	shared	vm-boot/full-install	dead base digest, licensed gitleaks action, 4M OVMF via -bios	79e6119	pushed, awaiting CI rerun
