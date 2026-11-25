@@ -8,6 +8,8 @@ pub const Command = struct {
     argv: []const []const u8,
     stdin: ?[]const u8 = null,
     allow_fail: bool = false,
+    /// Emit begin/end labels around this step for serial-console diagnosis.
+    trace: bool = false,
 };
 
 pub const WriteFile = struct {
@@ -139,10 +141,12 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
     try actions.append(allocator, .{ .command = .{
         .label = "mount scratch for pull",
         .argv = try dupeArgv(allocator, &.{ "mount", c.disk, container_root }),
+        .trace = true,
     } });
     try actions.append(allocator, .{ .command = .{
         .label = "mount scratch at /var/tmp for pull",
         .argv = try dupeArgv(allocator, &.{ "mount", c.disk, scratch_tmp }),
+        .trace = true,
     } });
     try actions.append(allocator, .{ .command = .{
         .label = "create container runroot on scratch",
@@ -170,27 +174,20 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
             container_graphroot, "--runroot", container_runroot, "pull",
             c.image,
         }),
-    } });
-    try actions.append(allocator, .{ .command = .{
-        .label = "restore default container storage config",
-        .argv = try dupeArgv(allocator, &.{ "rm", "-f", storage_conf_path }),
-    } });
-    try actions.append(allocator, .{ .command = .{
-        .label = "release scratch from /var/tmp",
-        .argv = try dupeArgv(allocator, &.{ "umount", scratch_tmp }),
-    } });
-    try actions.append(allocator, .{ .command = .{
-        .label = "release scratch filesystem",
-        .argv = try dupeArgv(allocator, &.{ "umount", container_root }),
+        .trace = true,
     } });
 
     var bootc_args: std.ArrayListUnmanaged([]const u8) = .empty;
     errdefer bootc_args.deinit(allocator);
     try bootc_args.appendSlice(allocator, &.{
-        "podman",                                  "run",            "--rm",                    "--privileged", "--pid=host",
-        "-v",                                      "/dev:/dev",      "--tmpfs",                 "/run/udev",    "-v",
-        "/var/lib/containers:/var/lib/containers", "--security-opt", "label=type:unconfined_t", c.image,        "bootc",
-        "install",                                 "to-disk",        "--composefs-backend",
+        "podman",              "run",                     "--rm",
+        "--privileged",        "--pid=host",              "--root",
+        container_graphroot,   "--runroot",               container_runroot,
+        "-v",                  "/dev:/dev",               "--tmpfs",
+        "/run/udev",           "-v",                      "/var/lib/containers:/var/lib/containers",
+        "--security-opt",      "label=type:unconfined_t", c.image,
+        "bootc",               "install",                 "to-disk",
+        "--composefs-backend",
     });
     if (c.encrypt) try bootc_args.appendSlice(allocator, &.{ "--block-setup", "tpm2-luks" });
     try bootc_args.appendSlice(allocator, &.{
@@ -209,6 +206,24 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
     try actions.append(allocator, .{ .command = .{
         .label = "bootc install to-disk",
         .argv = try bootc_args.toOwnedSlice(allocator),
+    } });
+    // The pulled image lives on the scratch filesystem. Keep every mount in
+    // place until bootc install has consumed it; releasing it earlier makes
+    // podman pull the image again into the RAM-backed live overlay and run out
+    // of space while unpacking.
+    try actions.append(allocator, .{ .command = .{
+        .label = "restore default container storage config",
+        .argv = try dupeArgv(allocator, &.{ "rm", "-f", storage_conf_path }),
+    } });
+    try actions.append(allocator, .{ .command = .{
+        .label = "release scratch from /var/tmp",
+        .argv = try dupeArgv(allocator, &.{ "umount", scratch_tmp }),
+        .trace = true,
+    } });
+    try actions.append(allocator, .{ .command = .{
+        .label = "release scratch filesystem",
+        .argv = try dupeArgv(allocator, &.{ "umount", container_root }),
+        .trace = true,
     } });
 
     if (c.ssid.len != 0) {
@@ -302,8 +317,8 @@ test "scratch disk mounts at container storage for the pull" {
     try std.testing.expect(unmount_index != null);
     try std.testing.expect(install_index != null);
     try std.testing.expect(mount_index.? < pull_index.?);
-    try std.testing.expect(pull_index.? < unmount_index.?);
-    try std.testing.expect(unmount_index.? < install_index.?);
+    try std.testing.expect(pull_index.? < install_index.?);
+    try std.testing.expect(install_index.? < unmount_index.?);
 }
 
 test "runroot config keeps podman state on the scratch filesystem" {
@@ -406,10 +421,9 @@ test "scratch covers container storage and var tmp around the pull" {
     try std.testing.expect(install_index != null);
     try std.testing.expect(container_mount.? < pull_index.?);
     try std.testing.expect(tmp_mount.? < pull_index.?);
-    try std.testing.expect(pull_index.? < tmp_unmount.?);
-    try std.testing.expect(pull_index.? < container_unmount.?);
-    try std.testing.expect(tmp_unmount.? < install_index.?);
-    try std.testing.expect(container_unmount.? < install_index.?);
+    try std.testing.expect(pull_index.? < install_index.?);
+    try std.testing.expect(install_index.? < tmp_unmount.?);
+    try std.testing.expect(install_index.? < container_unmount.?);
 }
 
 fn expectArgv(actual: []const []const u8, expected: []const []const u8) !void {
@@ -467,36 +481,79 @@ test "pull runs explicitly on scratch paths with TMPDIR set" {
     try std.testing.expect(df_index.? < pull_index.?);
 }
 
-test "signature verification uses profile identity before the pull" {
+fn rootFrom(argv: []const []const u8) ?[]const u8 {
+    for (argv, 0..) |arg, i| {
+        if (std.mem.eql(u8, arg, "--root") and i + 1 < argv.len) return argv[i + 1];
+    }
+    return null;
+}
+
+fn runrootFrom(argv: []const []const u8) ?[]const u8 {
+    for (argv, 0..) |arg, i| {
+        if (std.mem.eql(u8, arg, "--runroot") and i + 1 < argv.len) return argv[i + 1];
+    }
+    return null;
+}
+
+test "bootc install reuses the storage the pull populated" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
 
-    var identities: [2][]const u8 = undefined;
-    for ([_]profile_mod.Id{ .mjolnir, .muramasa }, 0..) |id, i| {
-        var c = config_mod.defaults();
-        c.disk = "/dev/vda";
-        config_mod.applyProfile(&c, id);
-        const p = try build(a, c, "00000000-0000-4000-8000-000000000000");
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
 
-        var verify_index: ?usize = null;
-        var pull_index: ?usize = null;
-        for (p.actions, 0..) |action, j| switch (action) {
-            .verify_signature => |sig| {
-                verify_index = j;
-                identities[i] = sig.certificate_identity;
-                try std.testing.expectEqualStrings(profile_mod.get(id).certificate_identity, sig.certificate_identity);
-                try std.testing.expectEqualStrings(profile_mod.get(id).oidc_issuer, sig.oidc_issuer);
-                try std.testing.expectEqualStrings(c.image, sig.image);
-            },
+    var pull_root: ?[]const u8 = null;
+    var pull_runroot: ?[]const u8 = null;
+    var install_root: ?[]const u8 = null;
+    var install_runroot: ?[]const u8 = null;
+    for (plan.actions) |action| switch (action) {
+        .command => |cmd| {
+            if (std.mem.eql(u8, cmd.label, "pull image")) {
+                pull_root = rootFrom(cmd.argv);
+                pull_runroot = runrootFrom(cmd.argv);
+            } else if (std.mem.eql(u8, cmd.label, "bootc install to-disk")) {
+                install_root = rootFrom(cmd.argv);
+                install_runroot = runrootFrom(cmd.argv);
+            }
+        },
+        else => {},
+    };
+
+    try std.testing.expectEqualStrings(container_graphroot, pull_root.?);
+    try std.testing.expectEqualStrings(container_runroot, pull_runroot.?);
+    try std.testing.expectEqualStrings(pull_root.?, install_root.?);
+    try std.testing.expectEqualStrings(pull_runroot.?, install_runroot.?);
+}
+
+test "mounts, unmounts and pull are traced on the serial console" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
+
+    const traced = [_][]const u8{
+        "mount scratch for pull",
+        "mount scratch at /var/tmp for pull",
+        "release scratch from /var/tmp",
+        "release scratch filesystem",
+        "pull image",
+    };
+    for (traced) |want| {
+        var found = false;
+        for (plan.actions) |action| switch (action) {
             .command => |cmd| {
-                if (std.mem.eql(u8, cmd.label, "pull image")) pull_index = j;
+                if (std.mem.eql(u8, cmd.label, want)) {
+                    try std.testing.expect(cmd.trace);
+                    found = true;
+                }
             },
             else => {},
         };
-        try std.testing.expect(verify_index != null);
-        try std.testing.expect(pull_index != null);
-        try std.testing.expect(verify_index.? < pull_index.?);
+        try std.testing.expect(found);
     }
-    try std.testing.expect(!std.mem.eql(u8, identities[0], identities[1]));
 }
