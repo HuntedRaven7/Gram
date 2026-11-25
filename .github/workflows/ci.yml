@@ -69,10 +69,20 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          version="8.30.1"
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          # Pinned release; checksum from gitleaks_8.30.1_checksums.txt.
+          checksum="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${version}"
+          curl -fsSL "${url}/${archive}" -o "${archive}"
+          echo "${checksum}  ${archive}" | sha256sum --check -
+          tar -xzf "${archive}" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
       - name: Scan for secrets
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gitleaks git . --config .gitleaks.toml --no-banner
 
   vm-boot:
     name: vm-boot
