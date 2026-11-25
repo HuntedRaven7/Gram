@@ -7,7 +7,7 @@ log1="${LOG1:-/tmp/gram-install-1.log}"
 log2="${LOG2:-/tmp/gram-install-2.log}"
 work="${WORK:-/tmp/gram-install-work}"
 ovmf="${OVMF:-}"
-install_timeout="${INSTALL_TIMEOUT:-3600}"
+install_timeout="${INSTALL_TIMEOUT:-2400}"
 boot_timeout="${BOOT_TIMEOUT:-600}"
 
 if [ -z "$ovmf" ]; then
@@ -34,29 +34,8 @@ qemu-img create -f qcow2 "$disk" 40G >/dev/null
 kvm=()
 if [ -w /dev/kvm ]; then kvm=(-enable-kvm); fi
 
-firmware=(-drive "if=pflash,format=raw,readonly=on,file=$ovmf")
-vars_source="${OVMF_VARS:-}"
-if [ -z "$vars_source" ]; then
-  for candidate in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd /usr/share/edk2/ovmf/OVMF_VARS.fd; do
-    if [ -f "$candidate" ]; then
-      vars_source="$candidate"
-      break
-    fi
-  done
-fi
-install_vars="$work/install-vars.fd"
-boot_vars="$work/boot-vars.fd"
-if [ -n "$vars_source" ]; then
-  cp "$vars_source" "$install_vars"
-  cp "$vars_source" "$boot_vars"
-else
-  truncate -s 128K "$install_vars"
-  truncate -s 128K "$boot_vars"
-fi
-firmware+=(-drive "if=pflash,format=raw,file=$install_vars")
-
 qemu-system-x86_64 "${kvm[@]}" -m 4096 -smp 2 -nographic \
-  "${firmware[@]}" -cdrom "$iso" -drive "file=$disk,if=virtio,format=qcow2" \
+  -bios "$ovmf" -cdrom "$iso" -drive "file=$disk,if=virtio,format=qcow2" \
   -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
   -qmp "unix:$qmp,server=on,wait=off" -serial mon:stdio >"$log1" 2>&1 &
 pid=$!
@@ -90,9 +69,7 @@ PY
 wait "$pid" || true
 
 timeout "${boot_timeout}s" qemu-system-x86_64 "${kvm[@]}" -m 4096 -smp 2 -nographic \
-  -drive "if=pflash,format=raw,readonly=on,file=$ovmf" \
-  -drive "if=pflash,format=raw,file=$boot_vars" \
-  -boot order=c -drive "file=$disk,if=virtio,format=qcow2" \
+  -bios "$ovmf" -boot order=c -drive "file=$disk,if=virtio,format=qcow2" \
   -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
   -serial mon:stdio >"$log2" 2>&1 || true
 
