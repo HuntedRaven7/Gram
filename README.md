@@ -50,7 +50,7 @@ A profile owns the image reference, filesystem, bootloader, minimum disk size, k
 - `mjolnir` uses `ghcr.io/huntedraven7/mjolnir:testing`, btrfs, systemd-boot, a signed UKI, and the `MjolnirState` partition. It adds the volatile-root kargs from the Mjolnir image.
 - `muramasa` uses `ghcr.io/huntedraven7/muramasa:testing` and the same install mechanics. Its exact state layout is not published, so Gram accepts any partition with a label ending in `State` and warns when it finds none.
 
-Both profiles call `podman run --privileged ... bootc install to-disk --composefs-backend --filesystem btrfs --bootloader systemd --run-repart --wipe`. `--run-repart` creates the state partition during install so Gram can write the persistent NetworkManager keyfile before first boot. Gram verifies the ESP, the UKI, the systemd-boot loader, and the root filesystem before it reports success.
+Both profiles call `podman run --privileged ... bootc install to-disk --composefs-backend --filesystem btrfs --bootloader systemd --wipe`. Gram leaves out `--run-repart`. The live ISO's systemd-repart cannot parse the target image's `Type=state` definition. The installed image creates its state partition on first boot with its own systemd-repart. Gram still verifies the ESP, the UKI, the systemd-boot loader, and the root filesystem before it reports success.
 
 ## Headless mode
 
@@ -79,7 +79,7 @@ Install backend. Gram starts with `to-disk` behind a profile table. Upstream cal
 
 ISO build. Gram uses its own script rather than image-builder or Mjolnir's script. The live root is a full bootc export, so the binary, NetworkManager, firmware, and pull tools share one filesystem and the initramfs stays small.
 
-WiFi. Gram uses `nmcli` and a keyfile, as Mjolnir does. The keyfile is written to the live root and to the persistent state partition, so the installed node joins the same network on reboot.
+WiFi. Gram uses `nmcli` and a keyfile, as Mjolnir does. It writes the keyfile to the live root for the installer. When a state partition is already present at install time, Gram also writes the keyfile there. When no state partition is present, Gram warns and continues. WiFi and machine-ID persistence on the installed node come from first-boot provisioning in the target image. Gram fixes the machine ID with the `systemd.machine_id=` kernel argument. Neither setting depends on an install-time state-partition write.
 
 TUI. Zigzag supplies the program, key events, and rendering. The wizard keeps one owner per field and sends the same `Plan` to the headless backend.
 
@@ -117,4 +117,4 @@ Zig, CI, and supply chain:
 
 Verified against the real artifact: unit tests pass, both dry-run goldens match, the ISO builds to `dist/gram-installer-amd64.iso`, QEMU boots it with OVMF, and `gram-installer.service` starts.
 
-Not yet verified: a full install of a published target image, the repart state-partition keyfile path on real hardware, a real WiFi association, and interactive TUI input inside the ISO. The QEMU command in `vm-test.sh` is the base for the full install test.
+Not yet verified: a full install of a published target image, first-boot state-partition provisioning, the installed WiFi keyfile on real hardware, a real WiFi association, and interactive TUI input inside the ISO. The QEMU command in `vm-test.sh` is the base for the full install test.
