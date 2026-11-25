@@ -87,7 +87,7 @@ Keep business logic out of the TUI view. Add new external commands as plan actio
 2. Declare SCOPE, GOAL, and OUT OF SCOPE before editing.
 3. One PR per issue. Branch `feat/<slug>` or `fix/<slug>`. Use conventional commits.
 4. Run the local checks, then push to `origin` only. Verify CI state with `gh run list --repo HuntedRaven7/Gram --limit 5` before claiming done.
-5. A decision gate is not code. Write the decision to `.audit/gram-bootc-installer.tsv` and link it from the PR.
+5. A decision gate is not code. Record the decision in the PR body and the linked design doc.
 6. Do not open a PR that claims acceptance it cannot prove. State the exact gap in the body.
 7. If you discover a convention or workaround, update `AGENTS.md` or `docs/SKILL.md` in the same PR.
 8. No session notes, changelog fragments from agents, or "append here" docs.
@@ -99,5 +99,4 @@ Keep business logic out of the TUI view. Add new external commands as plan actio
 | Task routing | `docs/SKILL.md` |
 | Usage, profiles, decisions, verification status | `README.md` |
 | Security policy and disclosure | `SECURITY.md` |
-| Decision trail | `.audit/gram-bootc-installer.tsv`, `.audit/gram-ci.tsv` |
 | CI and workflows | `.github/workflows/` |
