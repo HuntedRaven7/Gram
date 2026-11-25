@@ -21,16 +21,16 @@ end mount scratch at /var/tmp for pull
 create container runroot on scratch
 [dry-run] mkdir -p /var/lib/containers/runroot
 create container root on scratch
-[dry-run] mkdir -p /var/lib/containers/root
+[dry-run] mkdir -p /var/lib/containers/storage
 point container storage at scratch
 check free space before pull
 [dry-run] df -h /var/tmp /var/lib/containers /run
 begin pull image
 pull image
-[dry-run] env TMPDIR=/var/tmp podman --root /var/lib/containers/root --runroot /var/lib/containers/runroot pull ghcr.io/huntedraven7/mjolnir:testing
+[dry-run] env TMPDIR=/var/tmp podman --root /var/lib/containers/storage --runroot /var/lib/containers/runroot pull ghcr.io/huntedraven7/mjolnir:testing
 end pull image
 bootc install to-disk
-[dry-run] podman run --rm --privileged --pid=host --root /var/lib/containers/root --runroot /var/lib/containers/runroot -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir:testing bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem btrfs --bootloader systemd --run-repart --karg=systemd.firstboot=no --karg=quiet --karg=systemd.volatile=yes --karg=console=ttyS0,115200 --karg=systemd.machine_id=00000000-0000-4000-8000-000000000000 /dev/vda
+[dry-run] podman run --rm --privileged --pid=host --root /var/lib/containers/storage --runroot /var/lib/containers/runroot -v /dev:/dev --tmpfs /run/udev -v /var/lib/containers:/var/lib/containers --security-opt label=type:unconfined_t ghcr.io/huntedraven7/mjolnir:testing bootc install to-disk --composefs-backend --block-setup tpm2-luks --wipe --filesystem btrfs --bootloader systemd --run-repart --karg=systemd.firstboot=no --karg=quiet --karg=systemd.volatile=yes --karg=console=ttyS0,115200 --karg=systemd.machine_id=00000000-0000-4000-8000-000000000000 /dev/vda
 restore default container storage config
 [dry-run] rm -f /etc/containers/storage.conf
 begin release scratch from /var/tmp

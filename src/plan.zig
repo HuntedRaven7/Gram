@@ -46,14 +46,18 @@ pub const Plan = struct {
 };
 
 const container_root = "/var/lib/containers";
-const container_graphroot = "/var/lib/containers/root";
+// bootc resolves the install source with `podman inspect` in the host mount
+// namespace. That subprocess has no --root override, so it uses podman's
+// default graphroot. Pull into that exact path so the source image is visible
+// to bootc's source-info step.
+const container_graphroot = "/var/lib/containers/storage";
 const container_runroot = "/var/lib/containers/runroot";
 const scratch_tmp = "/var/tmp";
 const storage_conf_path = "/etc/containers/storage.conf";
 const storage_conf_content =
     \\[storage]
     \\driver = "overlay"
-    \\graphroot = "/var/lib/containers"
+    \\graphroot = "/var/lib/containers/storage"
     \\runroot = "/var/lib/containers/runroot"
     \\
 ;
@@ -361,7 +365,7 @@ test "runroot config keeps podman state on the scratch filesystem" {
         .write_file => |wf| {
             if (std.mem.eql(u8, wf.path, storage_conf_path)) {
                 config_index = i;
-                try std.testing.expect(std.mem.indexOf(u8, wf.content, "graphroot = \"/var/lib/containers\"") != null);
+                try std.testing.expect(std.mem.indexOf(u8, wf.content, "graphroot = \"/var/lib/containers/storage\"") != null);
                 try std.testing.expect(std.mem.indexOf(u8, wf.content, "runroot = \"/var/lib/containers/runroot\"") != null);
             }
         },
@@ -525,6 +529,42 @@ test "bootc install reuses the storage the pull populated" {
     try std.testing.expectEqualStrings(container_runroot, pull_runroot.?);
     try std.testing.expectEqualStrings(pull_root.?, install_root.?);
     try std.testing.expectEqualStrings(pull_runroot.?, install_runroot.?);
+}
+
+fn graphrootFrom(content: []const u8) ?[]const u8 {
+    const prefix = "graphroot = \"";
+    const start = std.mem.indexOf(u8, content, prefix) orelse return null;
+    const rest = content[start + prefix.len ..];
+    const end = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
+    return rest[0..end];
+}
+
+test "storage config points at the storage the pull and bootc install use" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
+
+    var config_root: ?[]const u8 = null;
+    var pull_root: ?[]const u8 = null;
+    var install_root: ?[]const u8 = null;
+    for (plan.actions) |action| switch (action) {
+        .write_file => |wf| {
+            if (std.mem.eql(u8, wf.path, storage_conf_path)) config_root = graphrootFrom(wf.content);
+        },
+        .command => |cmd| {
+            if (std.mem.eql(u8, cmd.label, "pull image")) pull_root = rootFrom(cmd.argv);
+            if (std.mem.eql(u8, cmd.label, "bootc install to-disk")) install_root = rootFrom(cmd.argv);
+        },
+        else => {},
+    };
+
+    try std.testing.expectEqualStrings(container_graphroot, config_root.?);
+    try std.testing.expectEqualStrings(config_root.?, pull_root.?);
+    try std.testing.expectEqualStrings(config_root.?, install_root.?);
 }
 
 test "mounts, unmounts and pull are traced on the serial console" {
