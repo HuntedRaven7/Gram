@@ -3,6 +3,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 iso="${ISO:-$root/dist/gram-installer-amd64.iso}"
 disk="${DISK:-/tmp/gram-install-test.qcow2}"
+scratch="${SCRATCH_DISK:-/tmp/gram-scratch.qcow2}"
 log1="${LOG1:-/tmp/gram-install-1.log}"
 log2="${LOG2:-/tmp/gram-install-2.log}"
 work="${WORK:-/tmp/gram-install-work}"
@@ -31,6 +32,7 @@ mkdir -p "$work"
 qmp="$work/qmp.sock"
 rm -f "$qmp"
 qemu-img create -f qcow2 "$disk" 40G >/dev/null
+qemu-img create -f qcow2 "$scratch" 20G >/dev/null
 kvm=()
 if [ -w /dev/kvm ]; then kvm=(-enable-kvm); fi
 
@@ -57,6 +59,7 @@ firmware+=(-drive "if=pflash,format=raw,file=$install_vars")
 
 qemu-system-x86_64 "${kvm[@]}" -m 4096 -smp 2 -nographic \
   "${firmware[@]}" -cdrom "$iso" -drive "file=$disk,if=virtio,format=qcow2" \
+  -drive "file=$scratch,if=virtio,format=qcow2" \
   -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
   -qmp "unix:$qmp,server=on,wait=off" -serial mon:stdio >"$log1" 2>&1 &
 pid=$!
