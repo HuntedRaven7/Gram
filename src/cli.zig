@@ -181,5 +181,9 @@ pub fn apply(allocator: std.mem.Allocator, io: std.Io, c: config_mod.Config, r: 
     const id = if (r.dry_run) "00000000-0000-4000-8000-000000000000" else try machineId(allocator, io);
     const p = try plan_mod.build(allocator, c, id);
     try execute_mod.execute(allocator, r, p.actions, print);
-    if (r.dry_run) try r.record("[dry-run] install complete\n");
+    if (r.dry_run) {
+        try r.record("[dry-run] install complete\n");
+    } else {
+        print("install complete");
+    }
 }
