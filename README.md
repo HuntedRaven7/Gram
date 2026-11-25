@@ -84,6 +84,34 @@ WiFi. Gram uses `nmcli` and a keyfile, as Mjolnir does. The keyfile is written t
 
 TUI. Zigzag supplies the program, key events, and rendering. The wizard keeps one owner per field and sends the same `Plan` to the headless backend.
 
+## References
+
+The installer design came from these sources.
+
+Installer shape and command sequence:
+
+- [knuckle](https://github.com/projectbluefin/knuckle) supplied the step wizard and the argv runner seam. It generates Butane and does not call bootc.
+- [Mjolnir's Go installer](https://github.com/HuntedRaven7/Mjolnir/tree/testing/installer) supplied the `podman run --privileged ... bootc install to-disk` command, wipe and confirmation flow, disk eligibility rules, WiFi keyfile, and post-install ESP check.
+- [Mjolnir's ISO script](https://github.com/HuntedRaven7/Mjolnir/blob/testing/installer/build-iso.sh) supplied the squashfs, dracut `dmsquash-live`, systemd-boot, and xorriso layout that Gram adapts.
+- [Mjolnir architecture](https://github.com/HuntedRaven7/Mjolnir/blob/testing/docs/ARCHITECTURE.md), [impermanence](https://github.com/HuntedRaven7/Mjolnir/blob/testing/docs/IMPERMANENCE.md), [security](https://github.com/HuntedRaven7/Mjolnir/blob/testing/docs/SECURITY.md), and [provisioning](https://github.com/HuntedRaven7/Mjolnir/blob/testing/docs/PROVISIONING.md) supplied the signed UKI, `MjolnirState`, volatile root, and first-boot credential assumptions.
+- [Muramasa architecture](https://github.com/HuntedRaven7/Muramasa/blob/testing/docs/ARCHITECTURE.md) supplied the desktop profile assumptions.
+
+bootc and composefs:
+
+- [bootc installation guide](https://bootc-dev.github.io/bootc/bootc-installation.7.html) and the [to-disk](https://bootc-dev.github.io/bootc/man/bootc-install-to-disk.8.html) and [to-filesystem](https://bootc-dev.github.io/bootc/man/bootc-install-to-filesystem.8.html) man pages defined the install surface.
+- [bootc composefs backend](https://bootc.dev/bootc/bootc-composefs.7.html), [sysroot layout](https://bootc-dev.github.io/bootc/bootc-sysroot.7.html), and [composefs](https://github.com/composefs/composefs) defined the digest, EROFS, verity, and state layout.
+- [bootc registries and offline](https://bootc-dev.github.io/bootc/bootc-registries-and-offline.7.html) and [compatible images](https://bootc-dev.github.io/bootc/bootc-compatible-images.7.html) defined auth paths and kernel or initramfs requirements.
+- [image-builder bootc ISO docs](https://osbuild.org/docs/developer-guide/projects/image-builder/advanced/bootc/isos/) informed the ISO comparison, even though Gram uses its own script.
+
+Zig, CI, and supply chain:
+
+- [Zig build system](https://ziglang.org/learn/build-system/) and [Zigzag](https://github.com/meszmate/zigzag) are the toolchain and TUI basis.
+- [mlugg/setup-zig](https://github.com/mlugg/setup-zig) pins Zig 0.16.0 in CI.
+- [Renovate regex custom managers](https://docs.renovatebot.com/modules/manager/regex/) and [GitHub Actions digest pinning](https://docs.renovatebot.com/modules/manager/github-actions/#digest-pinning-and-updating) drive dependency updates.
+- [systemd-cryptenroll](https://www.freedesktop.org/software/systemd/man/latest/systemd-cryptenroll.html) and [systemd-measure](https://www.freedesktop.org/software/systemd/man/latest/systemd-measure.html) are the basis for the signed PCR design record.
+- [cosign](https://github.com/sigstore/cosign) is the image signature verifier, and [artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds) are the release provenance source.
+- The live root is [quay.io/fedora/fedora-bootc](https://quay.io/repository/fedora/fedora-bootc), pinned by digest in `scripts/build-iso.sh`.
+
 ## Verification status
 
 Verified against the real artifact: unit tests pass, both dry-run goldens match, the ISO builds to `dist/gram-installer-amd64.iso`, QEMU boots it with OVMF, and `gram-installer.service` starts.
