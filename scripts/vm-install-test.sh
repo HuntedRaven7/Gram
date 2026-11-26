@@ -65,7 +65,7 @@ qemu-system-x86_64 "${kvm[@]}" -m 4096 -smp 2 -nographic \
 pid=$!
 
 deadline=$((SECONDS + install_timeout))
-until grep -aq '^install complete$' "$log1"; do
+until grep -aqE $'^install complete\r?$' "$log1"; do
   if ! kill -0 "$pid" 2>/dev/null; then break; fi
   if grep -aqE 'gram-installer\.service: (Failed with result|Main process exited, code=exited, status=[1-9])' "$log1"; then
     echo "gram-installer.service failed; log: $log1" >&2
@@ -79,7 +79,7 @@ until grep -aq '^install complete$' "$log1"; do
   fi
   sleep 5
 done
-if ! grep -aq '^install complete$' "$log1"; then
+if ! grep -aqE $'^install complete\r?$' "$log1"; then
   echo "installer service did not succeed" >&2
   kill "$pid" 2>/dev/null || true
   exit 1
