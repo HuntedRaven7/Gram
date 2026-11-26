@@ -25,6 +25,11 @@ pub const PersistWifi = struct {
     state_label: ?[]const u8,
 };
 
+pub const WipePartitions = struct {
+    label: []const u8,
+    disk: []const u8,
+};
+
 pub const PersistMachineId = struct {
     label: []const u8,
     machine_id: []const u8,
@@ -42,6 +47,7 @@ pub const Action = union(enum) {
     write_file: WriteFile,
     persist_wifi: PersistWifi,
     wipe_partitions: WipePartitions,
+    persist_machine_id: PersistMachineId,
     verify: Verify,
 };
 

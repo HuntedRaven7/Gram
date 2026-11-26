@@ -173,6 +173,11 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
                 print(pw.label);
                 try persistWifi(allocator, r, pw);
             },
+            .persist_machine_id => |pm| {
+                try note(r, pm.label);
+                print(pm.label);
+                try persistMachineId(allocator, r, pm);
+            },
             .wipe_partitions => |wp| {
                 try note(r, wp.label);
                 print(wp.label);
