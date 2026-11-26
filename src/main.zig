@@ -61,7 +61,11 @@ fn run(init: std.process.Init) !void {
         opts.profile != null or opts.image != null or opts.disk != null;
     if (headless) {
         try cli.apply(allocator, init.io, prepared.config, &r, execute.printStdout);
-        try writeOut(init.io, r.log.items);
+        // The install already succeeded. Mirroring the captured command log is
+        // diagnostic output; a failed console write must not fail the install.
+        writeOut(init.io, r.log.items) catch |err| {
+            std.debug.print("gram: could not mirror command log: {s}\n", .{@errorName(err)});
+        };
         return;
     }
 
