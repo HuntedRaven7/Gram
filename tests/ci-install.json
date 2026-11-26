@@ -4,6 +4,5 @@
   "disk": "/dev/vda",
   "scratchDisk": "/dev/vdb",
   "hostname": "mjolnir-1",
-  "timezone": "UTC",
-  "username": "admin"
+  "timezone": "UTC"
 }
