@@ -6,6 +6,7 @@ const Raw = struct {
     type: []const u8,
     fstype: ?[]const u8 = null,
     label: ?[]const u8 = null,
+    children: []Raw = &.{},
 };
 
 const Lsblk = struct {
@@ -44,10 +45,25 @@ const Layout = struct {
     root: ?[]const u8 = null,
 };
 
-fn scanLayout(parts: []const Raw) Layout {
+fn collectParts(allocator: std.mem.Allocator, raw: Raw, list: *std.ArrayListUnmanaged(Raw)) !void {
+    if (std.mem.eql(u8, raw.type, "part")) try list.append(allocator, raw);
+    for (raw.children) |child| try collectParts(allocator, child, list);
+}
+
+// lsblk prints partitions as direct entries on some util-linux versions and as
+// children of the disk on others. Both shapes must describe the installed disk.
+fn onDisk(path: []const u8, disk: []const u8) bool {
+    if (!std.mem.startsWith(u8, path, disk)) return false;
+    if (path.len == disk.len) return false;
+    const next = path[disk.len];
+    return std.ascii.isDigit(next) or next == 'p';
+}
+
+fn scanLayout(parts: []const Raw, disk: []const u8) Layout {
     var layout: Layout = .{};
     for (parts) |part| {
         if (!std.mem.eql(u8, part.type, "part")) continue;
+        if (!onDisk(part.path, disk)) continue;
         const fs = part.fstype orelse "";
         if (layout.esp == null and std.mem.eql(u8, fs, "vfat")) layout.esp = part.path;
         if (layout.root == null and (std.mem.eql(u8, fs, "btrfs") or std.mem.eql(u8, fs, "xfs") or std.mem.eql(u8, fs, "ext4"))) layout.root = part.path;
@@ -55,17 +71,41 @@ fn scanLayout(parts: []const Raw) Layout {
     return layout;
 }
 
+fn shown(value: ?[]const u8) []const u8 {
+    return value orelse "none";
+}
+
 pub fn verify(allocator: std.mem.Allocator, r: *runner_mod.Runner, disk: []const u8, require_uki: bool) !void {
     if (r.dry_run) return;
-    const text = try r.output(&.{ "lsblk", "-J", "-o", "PATH,TYPE,FSTYPE,LABEL", disk });
+    diag(r.io, "entry disk={s} require_uki={}", .{ disk, require_uki });
+    // Query all block devices, as execute.findState does. Passing a device to
+    // lsblk can yield no rows after bootc unmounts the target filesystems.
+    const text = r.output(&.{ "lsblk", "-J", "-o", "PATH,TYPE,FSTYPE,LABEL" }) catch |err| {
+        diag(r.io, "lsblk failed: {s}", .{@errorName(err)});
+        return err;
+    };
     defer allocator.free(text);
-    const parsed = try std.json.parseFromSlice(Lsblk, allocator, text, .{
+    diag(r.io, "lsblk bytes={d}", .{text.len});
+    if (text.len == 0) {
+        diag(r.io, "lsblk returned no data", .{});
+        return error.InstalledLayoutMissing;
+    }
+    const parsed = std.json.parseFromSlice(Lsblk, allocator, text, .{
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
-    });
+    }) catch |err| {
+        diag(r.io, "lsblk JSON parse failed: {s}", .{@errorName(err)});
+        return err;
+    };
     defer parsed.deinit();
 
-    const layout = scanLayout(parsed.value.blockdevices);
+    var parts: std.ArrayListUnmanaged(Raw) = .empty;
+    defer parts.deinit(allocator);
+    for (parsed.value.blockdevices) |raw| try collectParts(allocator, raw, &parts);
+    diag(r.io, "parsed devices={d} partitions={d}", .{ parsed.value.blockdevices.len, parts.items.len });
+
+    const layout = scanLayout(parts.items, disk);
+    diag(r.io, "layout esp={s} root={s}", .{ shown(layout.esp), shown(layout.root) });
     if (layout.esp == null) {
         diag(r.io, "no vfat ESP partition on {s}", .{disk});
         return error.InstalledLayoutMissing;
@@ -91,6 +131,7 @@ pub fn verify(allocator: std.mem.Allocator, r: *runner_mod.Runner, disk: []const
         diag(r.io, "no .efi systemd-boot loader in {s}", .{loader_dir});
         return error.MissingBootLoader;
     }
+    diag(r.io, "checks passed", .{});
 }
 
 fn tempEspPath(allocator: std.mem.Allocator, tmp: *const std.testing.TmpDir, suffix: []const u8) ![]u8 {
@@ -154,7 +195,37 @@ test "installed Mjolnir disk layout classifies the vfat ESP and ext4 root" {
         .allocate = .alloc_always,
     });
     defer parsed.deinit();
-    const layout = scanLayout(parsed.value.blockdevices);
+    const layout = scanLayout(parsed.value.blockdevices, "/dev/vda");
+    try std.testing.expectEqualStrings("/dev/vda2", layout.esp.?);
+    try std.testing.expectEqualStrings("/dev/vda3", layout.root.?);
+}
+
+test "nested lsblk children are found and scoped to the selected disk" {
+    const text =
+        \\{"blockdevices":[
+        \\{"path":"/dev/vda","type":"disk","fstype":null,"label":null,"children":[
+        \\{"path":"/dev/vda1","type":"part","fstype":null,"label":null},
+        \\{"path":"/dev/vda2","type":"part","fstype":"vfat","label":"EFI-SYSTEM"},
+        \\{"path":"/dev/vda3","type":"part","fstype":"ext4","label":"root"}
+        \\]},
+        \\{"path":"/dev/vdb","type":"disk","fstype":null,"label":null,"children":[
+        \\{"path":"/dev/vdb1","type":"part","fstype":"vfat","label":"SCRATCH-ESP"}
+        \\]}
+        \\]}
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const parsed = try std.json.parseFromSlice(Lsblk, allocator, text, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+    var parts: std.ArrayListUnmanaged(Raw) = .empty;
+    defer parts.deinit(allocator);
+    for (parsed.value.blockdevices) |raw| try collectParts(allocator, raw, &parts);
+    try std.testing.expectEqual(@as(usize, 4), parts.items.len);
+    const layout = scanLayout(parts.items, "/dev/vda");
     try std.testing.expectEqualStrings("/dev/vda2", layout.esp.?);
     try std.testing.expectEqualStrings("/dev/vda3", layout.root.?);
 }
