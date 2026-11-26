@@ -86,23 +86,50 @@ if ! grep -aqE $'^install complete\r?$' "$log1"; then
 fi
 echo "install completed"
 
-python3 - "$qmp" <<'PY'
+shutdown_timeout="${SHUTDOWN_TIMEOUT:-90}"
+if ! python3 - "$qmp" <<'PY'
 import socket
 import sys
 
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.settimeout(10)
 sock.connect(sys.argv[1])
 sock.sendall(b'{"execute":"system_powerdown"}\n')
 sock.close()
 PY
-wait "$pid" || true
+then
+  echo "QMP system_powerdown failed; guest will be terminated" >&2
+fi
+echo "powerdown sent; waiting up to ${shutdown_timeout}s for guest to exit"
 
+shutdown_deadline=$((SECONDS + shutdown_timeout))
+while kill -0 "$pid" 2>/dev/null; do
+  if [ "$SECONDS" -ge "$shutdown_deadline" ]; then
+    echo "guest ignored ACPI shutdown; terminating QEMU" >&2
+    kill -TERM "$pid" 2>/dev/null || true
+    term_deadline=$((SECONDS + 10))
+    while kill -0 "$pid" 2>/dev/null && [ "$SECONDS" -lt "$term_deadline" ]; do
+      sleep 1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "QEMU survived SIGTERM; sending SIGKILL" >&2
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+    break
+  fi
+  sleep 2
+done
+wait "$pid" || true
+echo "install VM exited"
+
+echo "starting second boot verification"
 timeout "${boot_timeout}s" qemu-system-x86_64 "${kvm[@]}" -m 4096 -smp 2 -nographic \
   -drive "if=pflash,format=raw,readonly=on,file=$ovmf" \
   -drive "if=pflash,format=raw,file=$boot_vars" \
   -boot order=c -drive "file=$disk,if=virtio,format=qcow2" \
   -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
   -serial mon:stdio >"$log2" 2>&1 || true
+echo "second boot log captured: $log2"
 
 status=0
 for needle in 'login:' 'systemd.firstboot=no' 'console=ttyS0'; do
