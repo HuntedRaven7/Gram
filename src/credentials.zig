@@ -13,28 +13,22 @@ pub const Kind = enum {
     fleet_kubeconfig,
 };
 
-pub const Requirement = enum {
-    always,
-    worker_only,
-    optional,
-};
-
 pub const Entry = struct {
     name: []const u8,
     kind: Kind,
-    requirement: Requirement,
 };
 
-/// Source of truth for the six Mjolnir provisioning credentials. The order
-/// matters: role is first so the worker-only requirement is known before the
-/// join credentials are considered. Only the Mjolnir profile reads this table.
+/// Source of truth for the six Mjolnir provisioning credentials. Only the
+/// Mjolnir profile reads this table. Worker join requirements are not checked
+/// here. The role comes from the installed image, which has no credential
+/// reader yet, so a normal install supplies none of these names.
 pub const registry = [_]Entry{
-    .{ .name = "role", .kind = .role, .requirement = .always },
-    .{ .name = "join-token", .kind = .join_token, .requirement = .worker_only },
-    .{ .name = "ca-cert-hash", .kind = .ca_cert_hash, .requirement = .worker_only },
-    .{ .name = "control-plane-endpoint", .kind = .control_plane_endpoint, .requirement = .worker_only },
-    .{ .name = "varlink-httpd.tls.trust", .kind = .varlink_trust, .requirement = .optional },
-    .{ .name = "fleet-kubeconfig", .kind = .fleet_kubeconfig, .requirement = .optional },
+    .{ .name = "role", .kind = .role },
+    .{ .name = "join-token", .kind = .join_token },
+    .{ .name = "ca-cert-hash", .kind = .ca_cert_hash },
+    .{ .name = "control-plane-endpoint", .kind = .control_plane_endpoint },
+    .{ .name = "varlink-httpd.tls.trust", .kind = .varlink_trust },
+    .{ .name = "fleet-kubeconfig", .kind = .fleet_kubeconfig },
 };
 
 pub const Check = struct {
@@ -127,11 +121,6 @@ fn fail(name: []const u8, err: anyerror) anyerror {
 
 pub fn errorMessage(allocator: std.mem.Allocator, err: anyerror) ?[]const u8 {
     return switch (err) {
-        error.MissingCredential => std.fmt.allocPrint(
-            allocator,
-            "mjolnir credential {s} is required but was not found",
-            .{failure_name},
-        ) catch null,
         error.InvalidCredential => std.fmt.allocPrint(
             allocator,
             "mjolnir credential {s} is invalid",
@@ -147,8 +136,8 @@ fn warn(r: *runner_mod.Runner, allocator: std.mem.Allocator, comptime fmt: []con
 
 /// Read the allowlisted names from the existing credential sources only. Pass
 /// an empty explicit value so nothing can come from JSON config or CLI flags.
-/// Required failures abort a real install before the plan is built; a dry run
-/// records a warning and stages nothing. Optional failures always warn.
+/// Every name is optional at install time. A missing value warns and stages
+/// nothing. A supplied value must validate before the plan is built.
 pub fn ingest(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -157,42 +146,19 @@ pub fn ingest(
 ) !config_mod.StagedCredentials {
     var values: std.ArrayListUnmanaged(config_mod.CredentialValue) = .empty;
     errdefer values.deinit(allocator);
-    var role: Role = .control_plane;
 
     for (registry) |entry| {
         const value = try config_mod.secret(allocator, io, env, "", entry.name);
-        const needed = switch (entry.requirement) {
-            .always => true,
-            .worker_only => role == .worker,
-            .optional => false,
-        };
-
         if (value.len == 0) {
-            if (needed and !r.dry_run) return fail(entry.name, error.MissingCredential);
-            if (needed) {
-                try warn(r, allocator, "mjolnir credential {s} not found, not staged", .{entry.name});
-            } else if (entry.requirement == .optional) {
-                try warn(r, allocator, "optional mjolnir credential {s} not found, not staged", .{entry.name});
-            }
+            try warn(r, allocator, "mjolnir credential {s} not found, not staged", .{entry.name});
             continue;
         }
 
         const result = check(entry.kind, value);
-        if (!result.ok) {
-            if (needed and !r.dry_run) return fail(entry.name, error.InvalidCredential);
-            if (needed) {
-                try warn(r, allocator, "mjolnir credential {s} is invalid, not staged", .{entry.name});
-            } else if (entry.requirement == .optional) {
-                try warn(r, allocator, "optional mjolnir credential {s} is invalid, not staged", .{entry.name});
-            } else {
-                try warn(r, allocator, "mjolnir credential {s} is invalid for this role, not staged", .{entry.name});
-            }
-            continue;
-        }
+        if (!result.ok) return fail(entry.name, error.InvalidCredential);
         if (result.warning) |text| {
             try warn(r, allocator, "mjolnir credential {s}: {s}", .{ entry.name, text });
         }
-        if (entry.kind == .role) role = parseRole(value).?;
         try values.append(allocator, .{ .name = entry.name, .value = value });
     }
 

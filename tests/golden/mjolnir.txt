@@ -1,6 +1,9 @@
 warning: mjolnir credential role not found, not staged
-warning: optional mjolnir credential varlink-httpd.tls.trust not found, not staged
-warning: optional mjolnir credential fleet-kubeconfig not found, not staged
+warning: mjolnir credential join-token not found, not staged
+warning: mjolnir credential ca-cert-hash not found, not staged
+warning: mjolnir credential control-plane-endpoint not found, not staged
+warning: mjolnir credential varlink-httpd.tls.trust not found, not staged
+warning: mjolnir credential fleet-kubeconfig not found, not staged
 [dry-run] lsblk -J -d -o PATH,SIZE,TYPE,MODEL,SERIAL,TRAN,RM,MOUNTPOINT
 resolved image: ghcr.io/huntedraven7/mjolnir:testing
 dns check skipped in dry-run for ghcr.io

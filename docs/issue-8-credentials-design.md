@@ -10,7 +10,7 @@ The decision is resolved from available evidence. Reversing it requires a Mjolni
 
 ## Current change: Gram side only
 
-This change stages a recovery copy of the six credentials into the `MjolnirState` partition at `etc/mjolnir/credentials/<name>` with mode 0600. It does not make a worker join on first boot, and it does not close issue 8.
+This change stages a recovery copy of a supplied credential into the `MjolnirState` partition at `etc/mjolnir/credentials/<name>` with mode 0600. All six names are optional at install time. A missing name warns and continues. A supplied name must validate. It does not make a worker join on first boot, and it does not close issue 8.
 
 The image-side gap remains: Mjolnir's units read credentials only from `$CREDENTIALS_DIRECTORY`, `/run/credentials/mjolnir/` and `/run/credentials/@system/`. There is no reader for a persisted path. Gram staging alone therefore does not supply a join token to `mjolnir-join.service`. A follow-up Mjolnir change must add `LoadCredential=` bindings that point at the persistent path before a staged token becomes the first boot source. Until then the persisted files are a recovery copy for an operator to consume.
 
@@ -62,18 +62,18 @@ The persisted credentials are a recovery copy. At first boot the consuming units
 
 ### Credential registry
 
-Use one table as the source of truth for name, consumer, requirement and validator. Do not scatter name checks across the config, plan and execute modules.
+Use one table as the source of truth for name, consumer and validator. Do not scatter name checks across the config, plan and execute modules.
 
-| Name | Consumer | Requirement | Destination file |
+| Name | Consumer | Install-time rule | Destination file |
 | --- | --- | --- | --- |
-| `role` | `mjolnir-init`, `mjolnir-join`, fleet units | Required for the Mjolnir profile | `etc/mjolnir/credentials/role` |
-| `join-token` | `mjolnir-join` | Required when role is `worker` | `etc/mjolnir/credentials/join-token` |
-| `ca-cert-hash` | `mjolnir-join` | Required when role is `worker` | `etc/mjolnir/credentials/ca-cert-hash` |
-| `control-plane-endpoint` | `mjolnir-join` | Required when role is `worker` | `etc/mjolnir/credentials/control-plane-endpoint` |
-| `varlink-httpd.tls.trust` | `varlink-httpd` | Optional with a warning | `etc/mjolnir/credentials/varlink-httpd.tls.trust` |
-| `fleet-kubeconfig` | `mjolnir-fleet-publish` | Optional with a warning | `etc/mjolnir/credentials/fleet-kubeconfig` |
+| `role` | `mjolnir-init`, `mjolnir-join`, fleet units | Stage when supplied | `etc/mjolnir/credentials/role` |
+| `join-token` | `mjolnir-join` | Stage when supplied | `etc/mjolnir/credentials/join-token` |
+| `ca-cert-hash` | `mjolnir-join` | Stage when supplied | `etc/mjolnir/credentials/ca-cert-hash` |
+| `control-plane-endpoint` | `mjolnir-join` | Stage when supplied | `etc/mjolnir/credentials/control-plane-endpoint` |
+| `varlink-httpd.tls.trust` | `varlink-httpd` | Stage when supplied | `etc/mjolnir/credentials/varlink-httpd.tls.trust` |
+| `fleet-kubeconfig` | `mjolnir-fleet-publish` | Stage when supplied | `etc/mjolnir/credentials/fleet-kubeconfig` |
 
-Issue 8 names all six values as needed. Gram requires `role` and, for a worker, the join triple. It warns for the two management credentials because Mjolnir runs without them in a basic cluster. Muramasa keeps its own credential set. Read and write none of these names on the Muramasa profile path.
+Issue 8 names all six values as needed, but a normal install supplies none of them. Gram cannot enforce the worker join requirement at install time because the role comes from the installed image, which has no persisted credential reader yet. Every name is therefore optional at install time. A missing name warns and stages nothing. A supplied name must pass validation or the install fails before the disk wipe. Muramasa keeps its own credential set. Read and write none of these names on the Muramasa profile path.
 
 ### Paths and modes
 
@@ -94,7 +94,7 @@ Validate at credential ingestion and pass typed values to the plan. The plan the
 - `varlink-httpd.tls.trust` contains a PEM BEGIN and END CERTIFICATE pair and is at most 65536 bytes.
 - `fleet-kubeconfig` is at most 1048576 bytes, the read cap in `fleet.c`, and contains `apiVersion:`, `kind: Config`, `clusters:`, `contexts:` and `users:`.
 
-Fail the install before the disk wipe when a required credential is missing or invalid. Name the credential in the error. Never print its value. An optional credential that is missing or invalid produces a warning and no file.
+Fail the install before the disk wipe when a supplied credential is invalid. Name the credential in the error. Never print its value. Any credential that is missing produces a warning and no file.
 
 ### Tests
 

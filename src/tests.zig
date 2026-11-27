@@ -238,7 +238,7 @@ test "credential ingestion stages all six names without logging values" {
     try std.testing.expect(std.mem.indexOf(u8, r.log.items, "warning:") == null);
 }
 
-test "invalid required credential fails with its name and never its value" {
+test "invalid supplied credential fails with its name and never its value" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -259,7 +259,7 @@ test "invalid required credential fails with its name and never its value" {
     try std.testing.expect(std.mem.indexOf(u8, r.log.items, bad) == null);
 }
 
-test "missing required credential fails with its name" {
+test "missing credentials warn and continue without staging" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -268,13 +268,35 @@ test "missing required credential fails with its name" {
 
     var r = runner.Runner.init(allocator, std.testing.io, false);
     defer r.deinit();
-    const result = credentials.ingest(allocator, std.testing.io, &f.env, &r);
-    try std.testing.expectError(error.MissingCredential, result);
-    const message = credentials.errorMessage(allocator, error.MissingCredential).?;
-    try std.testing.expect(std.mem.indexOf(u8, message, "role") != null);
+    const staged = try credentials.ingest(allocator, std.testing.io, &f.env, &r);
+
+    try std.testing.expectEqual(@as(usize, 0), staged.values.len);
+    const names = [_][]const u8{ "role", "join-token", "ca-cert-hash", "control-plane-endpoint", "varlink-httpd.tls.trust", "fleet-kubeconfig" };
+    for (names) |name| {
+        const expected = try std.fmt.allocPrint(allocator, "warning: mjolnir credential {s} not found, not staged", .{name});
+        try std.testing.expect(std.mem.indexOf(u8, r.log.items, expected) != null);
+    }
 }
 
-test "optional credentials warn when absent or invalid and are skipped" {
+test "missing management credentials warn and are skipped" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var f = try credFixture(allocator, &.{
+        .{ .name = "role", .value = "control-plane" },
+    });
+    defer f.deinit();
+
+    var r = runner.Runner.init(allocator, std.testing.io, false);
+    defer r.deinit();
+    const staged = try credentials.ingest(allocator, std.testing.io, &f.env, &r);
+
+    try std.testing.expectEqual(@as(usize, 1), staged.values.len);
+    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "warning: mjolnir credential varlink-httpd.tls.trust not found, not staged") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "warning: mjolnir credential fleet-kubeconfig not found, not staged") != null);
+}
+
+test "invalid supplied management credential fails with its name and never its value" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -287,15 +309,15 @@ test "optional credentials warn when absent or invalid and are skipped" {
 
     var r = runner.Runner.init(allocator, std.testing.io, false);
     defer r.deinit();
-    const staged = try credentials.ingest(allocator, std.testing.io, &f.env, &r);
-
-    try std.testing.expectEqual(@as(usize, 1), staged.values.len);
-    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "warning: optional mjolnir credential varlink-httpd.tls.trust is invalid") != null);
-    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "warning: optional mjolnir credential fleet-kubeconfig not found") != null);
+    const result = credentials.ingest(allocator, std.testing.io, &f.env, &r);
+    try std.testing.expectError(error.InvalidCredential, result);
+    const message = credentials.errorMessage(allocator, error.InvalidCredential).?;
+    try std.testing.expect(std.mem.indexOf(u8, message, "varlink-httpd.tls.trust") != null);
+    try std.testing.expect(std.mem.indexOf(u8, message, bad_cert) == null);
     try std.testing.expect(std.mem.indexOf(u8, r.log.items, bad_cert) == null);
 }
 
-test "dry run warns on invalid required credentials and stages the valid ones" {
+test "dry run rejects invalid supplied credentials" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -308,11 +330,33 @@ test "dry run warns on invalid required credentials and stages the valid ones" {
 
     var r = runner.Runner.init(allocator, std.testing.io, true);
     defer r.deinit();
+    const result = credentials.ingest(allocator, std.testing.io, &f.env, &r);
+
+    try std.testing.expectError(error.InvalidCredential, result);
+    const message = credentials.errorMessage(allocator, error.InvalidCredential).?;
+    try std.testing.expect(std.mem.indexOf(u8, message, "join-token") != null);
+    try std.testing.expect(std.mem.indexOf(u8, message, bad) == null);
+    try std.testing.expect(std.mem.indexOf(u8, r.log.items, bad) == null);
+}
+
+test "dry run stages supplied credentials when the rest are missing" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const token = "abcdef.0123456789abcdef";
+    var f = try credFixture(allocator, &.{
+        .{ .name = "role", .value = "worker" },
+        .{ .name = "join-token", .value = token },
+    });
+    defer f.deinit();
+
+    var r = runner.Runner.init(allocator, std.testing.io, true);
+    defer r.deinit();
     const staged = try credentials.ingest(allocator, std.testing.io, &f.env, &r);
 
-    try std.testing.expectEqual(@as(usize, 1), staged.values.len);
-    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "warning: mjolnir credential join-token is invalid") != null);
-    try std.testing.expect(std.mem.indexOf(u8, r.log.items, bad) == null);
+    try std.testing.expectEqual(@as(usize, 2), staged.values.len);
+    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "warning: mjolnir credential ca-cert-hash not found, not staged") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r.log.items, token) == null);
 }
 
 test "credential plan action stages names in log and keeps values out of argv and log" {
