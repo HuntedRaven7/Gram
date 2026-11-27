@@ -3,6 +3,8 @@ Description=Gram bootc installer
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/usr/local/bin/gram
+StartLimitIntervalSec=120s
+StartLimitBurst=2
 
 [Service]
 Type=simple
@@ -13,7 +15,8 @@ StandardInput=tty
 StandardOutput=tty
 StandardError=tty
 ExecStart=/usr/local/bin/gram
-Restart=no
+Restart=on-failure
+RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
