@@ -119,6 +119,24 @@ fn note(r: *runner_mod.Runner, text: []const u8) !void {
     try r.record("\n");
 }
 
+pub fn wipePartitions(allocator: std.mem.Allocator, r: *runner_mod.Runner, disk: []const u8) !void {
+    if (r.dry_run) return;
+    const text = try r.output(&.{ "lsblk", "-J", "-o", "PATH,TYPE", disk });
+    defer allocator.free(text);
+    if (text.len == 0) return;
+    const parsed = try std.json.parseFromSlice(Lsblk, allocator, text, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+    var parts: std.ArrayListUnmanaged(Raw) = .empty;
+    defer parts.deinit(allocator);
+    for (parsed.value.blockdevices) |raw| try collectParts(allocator, raw, &parts);
+    for (parts.items) |part| {
+        try r.run(&.{ "wipefs", "--all", "--force", part.path });
+    }
+}
+
 fn traceLabel(r: *runner_mod.Runner, print: *const fn ([]const u8) void, buf: []u8, phase: []const u8, label: []const u8) !void {
     const line = std.fmt.bufPrint(buf, "{s} {s}", .{ phase, label }) catch return;
     try note(r, line);
@@ -159,6 +177,11 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
                 try note(r, pm.label);
                 print(pm.label);
                 try persistMachineId(allocator, r, pm);
+            },
+            .wipe_partitions => |wp| {
+                try note(r, wp.label);
+                print(wp.label);
+                try wipePartitions(allocator, r, wp.disk);
             },
             .verify => |v| {
                 try note(r, v.label);
