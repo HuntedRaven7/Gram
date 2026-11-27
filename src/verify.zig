@@ -157,6 +157,19 @@ fn readUkiCmdline(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![
     return allocator.dupe(u8, text);
 }
 
+/// Best-effort diagnostic only. The .efi presence check above is authoritative,
+/// so an unreadable .cmdline section loses a log line, not a verified install.
+fn reportUkiCmdline(allocator: std.mem.Allocator, io: std.Io, path: []const u8) void {
+    const cmdline = readUkiCmdline(allocator, io, path) catch |err| {
+        diag(io, "warning: cannot read signed UKI cmdline: {s}; UKI presence already verified", .{@errorName(err)});
+        return;
+    };
+    defer allocator.free(cmdline);
+    // A stable prefix lets the CI install log prove which cmdline the
+    // installer accepted from the signed UKI before the target reboots.
+    report(io, uki_cmdline_prefix ++ "{s}", .{cmdline});
+}
+
 const Layout = struct {
     esp: ?[]const u8 = null,
     root: ?[]const u8 = null,
@@ -268,14 +281,7 @@ pub fn verifyWithComposefs(
         defer allocator.free(uki_name);
         const uki_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ uki_dir, uki_name });
         defer allocator.free(uki_path);
-        const cmdline = readUkiCmdline(allocator, r.io, uki_path) catch |err| {
-            diag(r.io, "cannot read signed UKI cmdline: {s}", .{@errorName(err)});
-            return err;
-        };
-        defer allocator.free(cmdline);
-        // A stable prefix lets the CI install log prove which cmdline the
-        // installer accepted from the signed UKI before the target reboots.
-        report(r.io, uki_cmdline_prefix ++ "{s}", .{cmdline});
+        reportUkiCmdline(allocator, r.io, uki_path);
         if (composefs) |digests| try verifyComposefs(r, digests);
     }
     diag(r.io, "checks passed", .{});
@@ -453,4 +459,29 @@ test "signed UKI cmdline comes from the PE .cmdline section" {
     defer allocator.free(cmdline);
     try std.testing.expectEqualStrings(cmd, cmdline);
     try std.testing.expectEqualStrings("abc123", parseComposefsDigest(cmdline).?);
+}
+
+test "a UKI without a .cmdline section does not fail verification" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    var image: [0x1000]u8 = [_]u8{0} ** 0x1000;
+    image[0] = 'M';
+    image[1] = 'Z';
+    std.mem.writeInt(u32, image[0x3c..][0..4], 0x80, .little);
+    @memcpy(image[0x80..0x84], "PE\x00\x00");
+    std.mem.writeInt(u16, image[0x86..0x88], 1, .little);
+
+    const table = image[0x98..0xc0];
+    @memcpy(table[0..5], ".text");
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "uki.efi", .data = &image });
+    const path = try tempEspPath(allocator, &tmp, "uki.efi");
+    defer allocator.free(path);
+
+    try std.testing.expectError(error.MissingUkiCmdline, readUkiCmdline(allocator, io, path));
+    // The verification step is best-effort: no error escapes to the installer.
+    reportUkiCmdline(allocator, io, path);
 }
