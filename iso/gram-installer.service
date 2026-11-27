@@ -1,7 +1,5 @@
 [Unit]
 Description=Gram bootc installer
-After=network-online.target
-Wants=network-online.target
 ConditionPathExists=/usr/local/bin/gram
 StartLimitIntervalSec=120s
 StartLimitBurst=2
