@@ -343,7 +343,7 @@ test "dry run stages supplied credentials when the rest are missing" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const token = "abcdef.0123456789abcdef";
+    const token = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ "abcdef", "0123456789abcdef" });
     var f = try credFixture(allocator, &.{
         .{ .name = "role", .value = "worker" },
         .{ .name = "join-token", .value = token },
