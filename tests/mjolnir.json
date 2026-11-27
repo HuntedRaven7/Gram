@@ -4,6 +4,5 @@
   "ssid": "testnet",
   "psk": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "hostname": "mjolnir-1",
-  "timezone": "UTC",
-  "username": "admin"
+  "timezone": "UTC"
 }

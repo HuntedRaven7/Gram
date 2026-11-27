@@ -18,6 +18,25 @@ test "config JSON parser accepts arbitrary bytes" {
     }.one, .{});
 }
 
+test "mjolnir rejects desktop identity fields" {
+    var c = config.defaults();
+    c.disk = "/dev/vda";
+    c.username = "admin";
+    try std.testing.expectError(error.MjolnirRejectsDesktopIdentity, config.validate(c));
+    try std.testing.expectEqualStrings("mjolnir profile rejects username, passwordHash and sshKeys", config.errorMessage(error.MjolnirRejectsDesktopIdentity).?);
+
+    c.username = "";
+    c.password_hash = "$6$salt$hash";
+    try std.testing.expectError(error.MjolnirRejectsDesktopIdentity, config.validate(c));
+
+    c.password_hash = "";
+    c.ssh_keys = &.{"ssh-ed25519 AAAA"};
+    try std.testing.expectError(error.MjolnirRejectsDesktopIdentity, config.validate(c));
+
+    config.applyProfile(&c, .muramasa);
+    try config.validate(c);
+}
+
 test "dry-run plan never contains secrets" {
     const psk = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const token = "registry-token-must-not-appear";
