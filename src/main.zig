@@ -9,6 +9,8 @@ const execute = @import("execute.zig");
 const verify = @import("verify.zig");
 const cli = @import("cli.zig");
 const tui = @import("tui.zig");
+const console = @import("console.zig");
+const console_generator = @import("console_generator.zig");
 const tests = @import("tests.zig");
 
 comptime {
@@ -19,6 +21,8 @@ comptime {
     _ = plan;
     _ = execute;
     _ = verify;
+    _ = console;
+    _ = console_generator;
     _ = tests;
 }
 

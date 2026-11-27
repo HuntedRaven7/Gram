@@ -20,6 +20,16 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("zigzag", zigzag.module("zigzag"));
     b.installArtifact(exe);
 
+    const console_generator = b.addExecutable(.{
+        .name = "gram-installer-console-generator",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/console_generator.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(console_generator);
+
     const tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
