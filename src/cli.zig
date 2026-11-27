@@ -168,11 +168,107 @@ test "digest detection" {
     try std.testing.expect(!hasDigest("ghcr.io/huntedraven7/mjolnir:testing"));
 }
 
+const dns_deadline = std.Io.Duration.fromSeconds(60);
+const dns_attempt_timeout = std.Io.Duration.fromSeconds(5);
+const dns_retry_delay = std.Io.Duration.fromSeconds(1);
+
+const RealDnsProbe = struct {
+    fn networkUp(_: *@This(), allocator: std.mem.Allocator, io: std.Io) bool {
+        const result = std.process.run(allocator, io, .{
+            .argv = &.{ "nm-online", "--quiet", "--timeout=1" },
+        }) catch return true;
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+        return switch (result.term) {
+            .exited => |code| code == 0,
+            else => false,
+        };
+    }
+
+    fn resolve(_: *@This(), allocator: std.mem.Allocator, io: std.Io, host: []const u8, timeout: std.Io.Duration) bool {
+        const result = std.process.run(allocator, io, .{
+            .argv = &.{ "getent", "hosts", host },
+            .timeout = .{ .duration = .{ .raw = timeout, .clock = .boot } },
+        }) catch return false;
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+        return switch (result.term) {
+            .exited => |code| code == 0,
+            else => false,
+        };
+    }
+};
+
+fn sleepBeforeRetry(io: std.Io, delay: std.Io.Duration, remaining: std.Io.Duration) !void {
+    const nanoseconds = @min(delay.nanoseconds, remaining.nanoseconds);
+    if (nanoseconds <= 0) return;
+    try std.Io.sleep(io, .{ .nanoseconds = nanoseconds }, .boot);
+}
+
+pub fn checkDnsWith(
+    comptime Probe: type,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    r: *runner_mod.Runner,
+    print: *const fn ([]const u8) void,
+    host: []const u8,
+    probe: *Probe,
+    deadline: std.Io.Duration,
+    retry_delay: std.Io.Duration,
+) !void {
+    if (r.dry_run) {
+        try r.record(try std.fmt.allocPrint(allocator, "dns check skipped in dry-run for {s}\n", .{host}));
+        return;
+    }
+    const end = std.Io.Clock.Timestamp.fromNow(io, .{ .raw = deadline, .clock = .boot });
+    try r.record(try std.fmt.allocPrint(allocator, "checking DNS for {s}\n", .{host}));
+    var waiting_logged = false;
+    while (true) {
+        var remaining = end.durationFromNow(io).raw;
+        if (remaining.nanoseconds <= 0) break;
+
+        if (!probe.networkUp(allocator, io)) {
+            if (!waiting_logged) {
+                const msg = try std.fmt.allocPrint(allocator, "waiting for network before DNS check for {s}\n", .{host});
+                try r.record(msg);
+                print(std.mem.trimEnd(u8, msg, "\n"));
+                waiting_logged = true;
+            }
+            try sleepBeforeRetry(io, retry_delay, remaining);
+            continue;
+        }
+
+        const attempt: std.Io.Duration = .{
+            .nanoseconds = @min(remaining.nanoseconds, dns_attempt_timeout.nanoseconds),
+        };
+        if (probe.resolve(allocator, io, host, attempt)) {
+            try r.record(try std.fmt.allocPrint(allocator, "DNS ok for {s}\n", .{host}));
+            return;
+        }
+
+        try r.record(try std.fmt.allocPrint(allocator, "DNS retry for {s}\n", .{host}));
+        remaining = end.durationFromNow(io).raw;
+        if (remaining.nanoseconds <= 0) break;
+        try sleepBeforeRetry(io, retry_delay, remaining);
+    }
+
+    const msg = try std.fmt.allocPrint(allocator, "DNS failed for {s}\n", .{host});
+    try r.record(msg);
+    print(std.mem.trimEnd(u8, msg, "\n"));
+    return error.DnsResolutionFailed;
+}
+
+fn checkDns(allocator: std.mem.Allocator, io: std.Io, r: *runner_mod.Runner, print: *const fn ([]const u8) void, host: []const u8) !void {
+    var probe: RealDnsProbe = .{};
+    try checkDnsWith(RealDnsProbe, allocator, io, r, print, host, &probe, dns_deadline, dns_retry_delay);
+}
+
 pub fn apply(allocator: std.mem.Allocator, io: std.Io, c: config_mod.Config, r: *runner_mod.Runner, print: *const fn ([]const u8) void) !void {
     try config_mod.validate(c);
     var resolved = c;
     if (!r.dry_run and !hasDigest(c.image)) resolved.image = try resolveImage(allocator, r, c.image);
     try r.record(try std.fmt.allocPrint(allocator, "resolved image: {s}\n", .{resolved.image}));
+    try checkDns(allocator, io, r, print, plan_mod.registryFromImage(c.image));
     const id = if (r.dry_run) "00000000-0000-4000-8000-000000000000" else try machineId(allocator, io);
     const p = try plan_mod.build(allocator, resolved, id);
     try execute_mod.execute(allocator, r, p.actions, print);
