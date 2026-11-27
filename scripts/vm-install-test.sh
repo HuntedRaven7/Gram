@@ -130,20 +130,46 @@ timeout "${boot_timeout}s" qemu-system-x86_64 "${kvm[@]}" -m 4096 -smp 2 -nograp
   -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
   -serial mon:stdio >"$log2" 2>&1 || true
 echo "second boot log captured: $log2"
+echo "checking target boot signals in $log2"
 
 status=0
-for needle in 'login:' 'systemd.firstboot=no' 'console=ttyS0'; do
-  if grep -aq "$needle" "$log2"; then
-    echo "target boot: found '$needle'"
+
+# The signed UKI cmdline carries composefs arguments; the installer ISO does
+# not. Mjolnir no longer carries systemd.firstboot=no.
+uki_cmdline="$(grep -a 'Command line:' "$log2" | head -n 1 || true)"
+for needle in 'console=ttyS0' 'composefs.digest=' 'composefs='; do
+  if printf '%s\n' "$uki_cmdline" | grep -aqF "$needle"; then
+    echo "target boot: UKI cmdline has '$needle'"
   else
-    echo "target boot: missing '$needle'" >&2
+    echo "target boot: UKI cmdline missing '$needle'" >&2
     status=1
   fi
 done
-if grep -aq 'Gram installer' "$log2"; then
-  echo "target boot: live ISO booted again" >&2
+
+# Mjolnir has no serial getty, so no login prompt appears. Local File Systems
+# shows the installed userspace started after switch-root.
+if grep -aqF 'Reached target Local File Systems' "$log2"; then
+  echo "target boot: reached Local File Systems"
+else
+  echo "target boot: did not reach Local File Systems" >&2
   status=1
 fi
+
+if installer_lines="$(grep -anF 'Gram installer' "$log2" | cut -d: -f1 | paste -sd, -)"; then
+  echo "target boot: live ISO booted again (line $installer_lines)" >&2
+  status=1
+else
+  echo "target boot: no live ISO installer"
+fi
+
+if fault_lines="$(grep -aEin 'kernel panic|call trace' "$log2")"; then
+  echo "target boot: kernel panic or Call Trace detected" >&2
+  printf '%s\n' "$fault_lines" >&2
+  status=1
+else
+  echo "target boot: no kernel panic or Call Trace"
+fi
+
 echo "install log: $log1"
 echo "boot log: $log2"
 exit "$status"
