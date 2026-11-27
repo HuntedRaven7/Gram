@@ -97,6 +97,19 @@ pub fn validate(c: Config) !void {
     if (c.disk.len == 0 or !std.mem.startsWith(u8, c.disk, "/dev/")) return error.InvalidDisk;
     if (c.ssid.len != 0 and !validPsk(c.psk)) return error.InvalidPsk;
     if (c.registry.len != 0 and c.registry_user.len == 0 and c.registry_token.len != 0) return error.MissingRegistryUser;
+    if (!profile_mod.get(c.profile).accepts_identity and (c.username.len != 0 or c.password_hash.len != 0 or c.ssh_keys.len != 0)) {
+        return error.MjolnirRejectsDesktopIdentity;
+    }
+}
+
+pub fn errorMessage(err: anyerror) ?[]const u8 {
+    return switch (err) {
+        error.MjolnirRejectsDesktopIdentity => "mjolnir profile rejects username, passwordHash and sshKeys",
+        error.NoEligibleDisk => "no eligible disks: removable, mounted and boot disks are excluded",
+        error.DiskTooSmall => "target disk is below the profile minimum",
+        error.DiskNotEligible => "configured disk is not eligible",
+        else => null,
+    };
 }
 
 pub fn validPsk(psk: []const u8) bool {
@@ -147,6 +160,17 @@ test "json config with camelCase keys" {
     try std.testing.expectEqualStrings("ghcr.io/huntedraven7/muramasa:testing", c.image);
     try std.testing.expectEqualStrings("bot", c.registry_user);
     try std.testing.expectEqual(@as(usize, 1), c.ssh_keys.len);
+}
+
+test "digest pinned image survives config parsing and validation" {
+    const image = "ghcr.io/huntedraven7/mjolnir@sha256:243dc4c2ae1249ff4e078e3a74b73645e2b4a2d3493730ccd0fbe853540b030b";
+    const text = try std.fmt.allocPrint(std.testing.allocator, "{{\"image\":\"{s}\",\"disk\":\"/dev/vda\"}}", .{image});
+    defer std.testing.allocator.free(text);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const c = try fromJson(arena.allocator(), text);
+    try validate(c);
+    try std.testing.expectEqualStrings(image, c.image);
 }
 
 test "psk validation" {

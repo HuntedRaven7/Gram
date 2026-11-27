@@ -17,6 +17,7 @@ pub const Profile = struct {
     require_uki: bool = true,
     state_label: ?[]const u8 = null,
     kargs: []const []const u8 = &.{},
+    accepts_identity: bool = true,
 };
 
 pub fn get(id: Id) Profile {
@@ -32,6 +33,7 @@ pub fn get(id: Id) Profile {
             // composefs UKI needs.
             .filesystem = "ext4",
             .state_label = "MjolnirState",
+            .accepts_identity = false,
             .kargs = &.{
                 "systemd.firstboot=no",
                 "quiet",

@@ -17,12 +17,14 @@ for tool in "$ZIG" podman mformat mcopy mmd mksquashfs xorriso tar curl sha256su
 done
 
 rm -rf "$BUILD"
-mkdir -p "$BUILD"/{esp/EFI/BOOT,esp/loader/entries,esp/LiveOS,squashfs/etc,squashfs/usr/local/bin,squashfs/usr/lib/systemd/system,squashfs/usr/lib/systemd/system/multi-user.target.wants}
+mkdir -p "$BUILD"/{esp/EFI/BOOT,esp/loader/entries,esp/LiveOS,squashfs/etc,squashfs/usr/local/bin,squashfs/usr/lib/systemd/system,squashfs/usr/lib/systemd/system/multi-user.target.wants,squashfs/usr/lib/systemd/system-generators}
 mkdir -p "$OUT"
 
 echo "==> building static installer"
 "$ZIG" build --prefix "$BUILD/gram-prefix" -Doptimize=ReleaseSafe -Dcpu=baseline
 install -m 0755 "$BUILD/gram-prefix/bin/gram" "$BUILD/squashfs/usr/local/bin/gram"
+install -m 0755 "$BUILD/gram-prefix/bin/gram-installer-console-generator" \
+  "$BUILD/squashfs/usr/lib/systemd/system-generators/gram-installer-console-generator"
 
 echo "==> staging live root from $BASE_IMAGE"
 podman rm -f gram-iso-root >/dev/null 2>&1 || true

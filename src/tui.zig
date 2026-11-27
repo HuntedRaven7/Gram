@@ -94,6 +94,10 @@ const Model = struct {
         return .none;
     }
 
+    fn identityFields(self: *const Model) usize {
+        return if (profile_mod.get(profiles[self.profile_index]).accepts_identity) 3 else 2;
+    }
+
     fn current(self: *Model) ?*Text {
         return switch (self.step) {
             .image => &self.image,
@@ -107,7 +111,7 @@ const Model = struct {
             .identity => switch (self.field) {
                 0 => &self.hostname,
                 1 => &self.timezone,
-                2 => &self.username,
+                2 => if (self.identityFields() == 3) &self.username else null,
                 else => null,
             },
             .review => &self.confirm,
@@ -153,7 +157,7 @@ const Model = struct {
         c.registry_token = self.registry_token.slice();
         c.hostname = self.hostname.slice();
         c.timezone = self.timezone.slice();
-        c.username = self.username.slice();
+        c.username = if (self.identityFields() == 3) self.username.slice() else "";
         if (prepared.disks.len != 0) c.disk = prepared.disks[self.disk_index].path;
         return c;
     }
@@ -196,7 +200,7 @@ const Model = struct {
                     .tab => {
                         const count: usize = switch (self.step) {
                             .network => 4,
-                            .identity => 3,
+                            .identity => self.identityFields(),
                             else => 1,
                         };
                         self.field = (self.field + 1) % count;
@@ -268,8 +272,10 @@ const Model = struct {
             .identity => {
                 try append(alloc, &body, "Hostname [{s}]: {s}\n", .{ if (self.field == 0) "*" else " ", self.hostname.slice() });
                 try append(alloc, &body, "Timezone [{s}]: {s}\n", .{ if (self.field == 1) "*" else " ", self.timezone.slice() });
-                try append(alloc, &body, "Username [{s}]: {s}\n\n", .{ if (self.field == 2) "*" else " ", self.username.slice() });
-                try body.appendSlice(alloc, "Tab  next field   Enter  continue   Esc  quit\n");
+                if (self.identityFields() == 3) {
+                    try append(alloc, &body, "Username [{s}]: {s}\n", .{ if (self.field == 2) "*" else " ", self.username.slice() });
+                }
+                try body.appendSlice(alloc, "\nTab  next field   Enter  continue   Esc  quit\n");
             },
             .disk => {
                 try body.appendSlice(alloc, "Target disk:\n");
