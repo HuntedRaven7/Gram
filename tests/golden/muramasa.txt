@@ -20,6 +20,8 @@ create container root on scratch
 point container storage at scratch
 check free space before pull
 [dry-run] df -h /var/tmp /var/lib/containers /run
+verify image signature
+[dry-run] cosign verify --certificate-identity-regexp ^https://github\.com/HuntedRaven7/Muramasa/\.github/workflows/build\.yml@refs/heads/(testing|gh-readonly-queue/testing/.+)$ --certificate-oidc-issuer https://token.actions.githubusercontent.com --new-bundle-format=false ghcr.io/huntedraven7/muramasa:testing
 begin pull image
 pull image
 [dry-run] env TMPDIR=/var/tmp podman --root /var/lib/containers/storage --runroot /var/lib/containers/runroot pull ghcr.io/huntedraven7/muramasa:testing

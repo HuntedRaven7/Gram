@@ -1,6 +1,7 @@
 const std = @import("std");
 const plan_mod = @import("plan.zig");
 const runner_mod = @import("runner.zig");
+const signature_mod = @import("signature.zig");
 const verify_mod = @import("verify.zig");
 
 const state_mount = "/mnt/gram-state";
@@ -177,6 +178,11 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
                 try note(r, pm.label);
                 print(pm.label);
                 try persistMachineId(allocator, r, pm);
+            },
+            .verify_signature => |sig| {
+                try note(r, "verify image signature");
+                print("verify image signature");
+                try signature_mod.verify(allocator, r, sig);
             },
             .wipe_partitions => |wp| {
                 try note(r, wp.label);

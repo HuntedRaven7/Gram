@@ -9,7 +9,7 @@ ZIG="${ZIG:-zig}"
 BASE_IMAGE="${BASE_IMAGE:-quay.io/fedora/fedora-bootc@sha256:0c5882dac9fbf76e285e816217c0a931c4b5e1236d56bd071bc723743b025299}"
 BOOT_EFI="$([ "$ARCH" = arm64 ] && echo BOOTAA64.EFI || echo BOOTX64.EFI)"
 
-for tool in "$ZIG" podman mformat mcopy mmd mksquashfs xorriso tar; do
+for tool in "$ZIG" podman mformat mcopy mmd mksquashfs xorriso tar curl sha256sum; do
   command -v "$tool" >/dev/null || {
     echo "missing tool: $tool" >&2
     exit 1
@@ -71,6 +71,28 @@ if ! podman exec "$CID" sh -c 'command -v wpa_supplicant' >/dev/null 2>&1; then
   podman exec "$CID" sh -c 'dnf install -y wpa_supplicant' >/dev/null
   podman export "$CID" | tar -x -C "$ROOTFS" ./usr/sbin/wpa_supplicant ./usr/bin/wpa_supplicant 2>/dev/null || true
 fi
+
+# Gram checks the target image signature before it pulls. Pin cosign and its
+# checksum instead of taking whatever version the base image repositories ship.
+COSIGN_VERSION="v2.6.5"
+case "$ARCH" in
+amd64)
+  COSIGN_SHA="c3b4f5410e608af03a5eb0aaac84a4313d8da131248e08ff1759ac70c79d1644"
+  ;;
+arm64)
+  COSIGN_SHA="426193b4c5da4d4d643e822f48fe0cc8a476ca1782a272704831f5a0cef716d7"
+  ;;
+*)
+  echo "unsupported arch for cosign: $ARCH" >&2
+  exit 1
+  ;;
+esac
+echo "==> installing cosign $COSIGN_VERSION in live root"
+curl -fsSL \
+  "https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-$ARCH" \
+  -o "$BUILD/cosign"
+echo "$COSIGN_SHA  $BUILD/cosign" | sha256sum -c -
+install -m 0755 "$BUILD/cosign" "$ROOTFS/usr/local/bin/cosign"
 
 echo "==> building live root squashfs"
 mksquashfs "$ROOTFS" "$BUILD/esp/LiveOS/squashfs.img" -noappend -comp xz -no-xattrs

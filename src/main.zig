@@ -7,6 +7,7 @@ const disk = @import("disk.zig");
 const plan = @import("plan.zig");
 const execute = @import("execute.zig");
 const verify = @import("verify.zig");
+const signature = @import("signature.zig");
 const cli = @import("cli.zig");
 const tui = @import("tui.zig");
 const console = @import("console.zig");
@@ -21,6 +22,7 @@ comptime {
     _ = plan;
     _ = execute;
     _ = verify;
+    _ = signature;
     _ = console;
     _ = console_generator;
     _ = tests;
