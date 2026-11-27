@@ -3,6 +3,7 @@ const config = @import("config.zig");
 const plan = @import("plan.zig");
 const runner = @import("runner.zig");
 const execute = @import("execute.zig");
+const cli = @import("cli.zig");
 
 fn quiet(_: []const u8) void {}
 
@@ -87,4 +88,66 @@ test "Mjolnir dry-run has no kargs and persists the machine ID; Muramasa keeps i
     try execute.execute(allocator, &muramasa_run, muramasa.actions, quiet);
     try std.testing.expect(std.mem.indexOf(u8, muramasa_run.log.items, "--karg=quiet") != null);
     try std.testing.expect(std.mem.indexOf(u8, muramasa_run.log.items, try std.fmt.allocPrint(allocator, "--karg=systemd.machine_id={s}", .{id})) != null);
+}
+
+test "DNS check waits for the network and retries a failing lookup" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var r = runner.Runner.init(allocator, std.testing.io, false);
+    defer r.deinit();
+
+    const Probe = struct {
+        network_calls: usize = 0,
+        resolve_calls: usize = 0,
+        network_ready: bool = false,
+        premature: bool = false,
+
+        pub fn networkUp(self: *@This(), _: std.mem.Allocator, _: std.Io) bool {
+            self.network_calls += 1;
+            if (self.network_calls == 3) self.network_ready = true;
+            return self.network_ready;
+        }
+
+        pub fn resolve(self: *@This(), _: std.mem.Allocator, _: std.Io, _: []const u8, _: std.Io.Duration) bool {
+            if (!self.network_ready) self.premature = true;
+            self.resolve_calls += 1;
+            return self.resolve_calls == 3;
+        }
+    };
+    var probe: Probe = .{};
+    try cli.checkDnsWith(Probe, allocator, std.testing.io, &r, quiet, "ghcr.io", &probe, std.Io.Duration.fromSeconds(5), .zero);
+
+    try std.testing.expect(!probe.premature);
+    try std.testing.expectEqual(@as(usize, 3), probe.resolve_calls);
+    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "waiting for network before DNS check for ghcr.io") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "DNS ok for ghcr.io") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "DNS failed for ghcr.io") == null);
+}
+
+test "unreachable registry still fails with its host after retries" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var r = runner.Runner.init(allocator, std.testing.io, false);
+    defer r.deinit();
+
+    const Probe = struct {
+        resolve_calls: usize = 0,
+
+        pub fn networkUp(_: *@This(), _: std.mem.Allocator, _: std.Io) bool {
+            return true;
+        }
+
+        pub fn resolve(self: *@This(), _: std.mem.Allocator, _: std.Io, _: []const u8, _: std.Io.Duration) bool {
+            self.resolve_calls += 1;
+            return false;
+        }
+    };
+    var probe: Probe = .{};
+    const err = cli.checkDnsWith(Probe, allocator, std.testing.io, &r, quiet, "bad.example", &probe, std.Io.Duration.fromMicroseconds(100), .zero);
+
+    try std.testing.expectError(error.DnsResolutionFailed, err);
+    try std.testing.expect(probe.resolve_calls >= 1);
+    try std.testing.expect(std.mem.indexOf(u8, r.log.items, "DNS failed for bad.example") != null);
 }
