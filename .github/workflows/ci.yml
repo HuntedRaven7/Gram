@@ -52,6 +52,8 @@ jobs:
       - name: Check shell formatting
         run: |
           "$(go env GOPATH)/bin/shfmt" -i 2 -d scripts/*.sh
+      - name: Check boot log assertions against synthetic logs
+        run: ./tests/check-boot-log-fixtures.sh
 
   workflow-lint:
     name: workflow-lint

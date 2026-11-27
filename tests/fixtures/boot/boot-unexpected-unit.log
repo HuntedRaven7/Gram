@@ -1,0 +1,9 @@
+[    2.000000] Command line: BOOT_IMAGE=(hd0,gpt2)/EFI/Linux/bootc/abc.efi console=ttyS0 composefs.digest=1111 composefs=verity
+[   94.000000] systemd[1]: Reached target Local File Systems.
+[   95.000000] systemd[1]: Started Target Service.
+[   94.353439] systemd[1]: Starting Repartition Root Disk...
+[0;1;31mFAILED[0m] Failed to start Repartition Root Disk.
+[   94.374441] systemd[1]: Failed to start Repartition Root Disk.
+[   95.447907] systemd[1]: Failed to start Load Audit Rules.
+[  215.661259] systemd[1]: Failed to start Wait for Network to be Online.
+[   96.000000] systemd[1]: Failed to start Gram Init Service.
