@@ -149,6 +149,17 @@ test "json config with camelCase keys" {
     try std.testing.expectEqual(@as(usize, 1), c.ssh_keys.len);
 }
 
+test "digest pinned image survives config parsing and validation" {
+    const image = "ghcr.io/huntedraven7/mjolnir@sha256:243dc4c2ae1249ff4e078e3a74b73645e2b4a2d3493730ccd0fbe853540b030b";
+    const text = try std.fmt.allocPrint(std.testing.allocator, "{{\"image\":\"{s}\",\"disk\":\"/dev/vda\"}}", .{image});
+    defer std.testing.allocator.free(text);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const c = try fromJson(arena.allocator(), text);
+    try validate(c);
+    try std.testing.expectEqualStrings(image, c.image);
+}
+
 test "psk validation" {
     try std.testing.expect(validPsk("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
     try std.testing.expect(!validPsk("short"));

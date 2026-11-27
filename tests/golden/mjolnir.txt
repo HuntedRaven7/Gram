@@ -1,4 +1,5 @@
 [dry-run] lsblk -J -d -o PATH,SIZE,TYPE,MODEL,SERIAL,TRAN,RM,MOUNTPOINT
+resolved image: ghcr.io/huntedraven7/mjolnir:testing
 write live WiFi profile
 reload NetworkManager
 [dry-run] nmcli connection reload
