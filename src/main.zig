@@ -2,6 +2,7 @@ const std = @import("std");
 
 const profile = @import("profile.zig");
 const config = @import("config.zig");
+const credentials = @import("credentials.zig");
 const runner = @import("runner.zig");
 const disk = @import("disk.zig");
 const plan = @import("plan.zig");
@@ -17,6 +18,7 @@ const tests = @import("tests.zig");
 comptime {
     _ = profile;
     _ = config;
+    _ = credentials;
     _ = runner;
     _ = disk;
     _ = plan;
@@ -81,7 +83,8 @@ fn run(init: std.process.Init) !void {
 
 pub fn main(init: std.process.Init) !void {
     run(init) catch |err| {
-        const message = config.errorMessage(err) orelse @errorName(err);
+        const message = credentials.errorMessage(init.arena.allocator(), err) orelse
+            config.errorMessage(err) orelse @errorName(err);
         const line = std.fmt.allocPrint(init.arena.allocator(), "{s}\n", .{message}) catch message;
         writeErr(init.io, line) catch {};
         std.process.exit(1);

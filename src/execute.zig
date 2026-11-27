@@ -115,6 +115,13 @@ pub fn persistMachineId(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: 
     try writeToState(allocator, r, "etc/machine-id", content, 0o444, p.state_label, "no state partition found, machine ID not persisted");
 }
 
+pub fn persistCredentials(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: plan_mod.PersistCredentials) !void {
+    for (p.values) |value| {
+        const rel = try std.fmt.allocPrint(allocator, "etc/mjolnir/credentials/{s}", .{value.name});
+        try writeToState(allocator, r, rel, value.value, 0o600, p.state_label, "no state partition found, Mjolnir credentials not persisted");
+    }
+}
+
 fn note(r: *runner_mod.Runner, text: []const u8) !void {
     try r.record(text);
     try r.record("\n");
@@ -178,6 +185,14 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
                 try note(r, pm.label);
                 print(pm.label);
                 try persistMachineId(allocator, r, pm);
+            },
+            .persist_credentials => |pc| {
+                try note(r, pc.label);
+                print(pc.label);
+                for (pc.values) |value| {
+                    try r.record(try std.fmt.allocPrint(allocator, "mjolnir credential: {s}\n", .{value.name}));
+                }
+                try persistCredentials(allocator, r, pc);
             },
             .verify_signature => |sig| {
                 try note(r, "verify image signature");
