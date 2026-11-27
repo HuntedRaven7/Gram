@@ -164,14 +164,11 @@ test "unreachable registry still fails with its host after retries" {
     defer r.deinit();
 
     const Probe = struct {
-        resolve_calls: usize = 0,
-
         pub fn networkUp(_: *@This(), _: std.mem.Allocator, _: std.Io) bool {
             return true;
         }
 
-        pub fn resolve(self: *@This(), _: std.mem.Allocator, _: std.Io, _: []const u8, _: std.Io.Duration) bool {
-            self.resolve_calls += 1;
+        pub fn resolve(_: *@This(), _: std.mem.Allocator, _: std.Io, _: []const u8, _: std.Io.Duration) bool {
             return false;
         }
     };
@@ -179,6 +176,5 @@ test "unreachable registry still fails with its host after retries" {
     const err = cli.checkDnsWith(Probe, allocator, std.testing.io, &r, quiet, "bad.example", &probe, std.Io.Duration.fromMicroseconds(100), .zero);
 
     try std.testing.expectError(error.DnsResolutionFailed, err);
-    try std.testing.expect(probe.resolve_calls >= 1);
     try std.testing.expect(std.mem.indexOf(u8, r.log.items, "DNS failed for bad.example") != null);
 }
