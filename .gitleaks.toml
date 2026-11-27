@@ -6,3 +6,7 @@ useDefault = true
 [[allowlists]]
 description = "Synthetic WiFi PSK fixture used by the dry-run golden"
 paths = ['''tests/mjolnir\.json''']
+
+[[allowlists]]
+description = "Synthetic join-token fixture used by credential validation tests"
+regexes = ['''^abcdef\.0123456789abcdef$''']
