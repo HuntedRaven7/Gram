@@ -1,4 +1,5 @@
 [dry-run] lsblk -J -d -o PATH,SIZE,TYPE,MODEL,SERIAL,TRAN,RM,MOUNTPOINT
+resolved image: ghcr.io/huntedraven7/muramasa:testing
 dns check skipped in dry-run for ghcr.io
 wipe target disk
 [dry-run] wipefs --all --force /dev/vda
