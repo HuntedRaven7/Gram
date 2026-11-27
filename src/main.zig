@@ -78,5 +78,10 @@ fn run(init: std.process.Init) !void {
 }
 
 pub fn main(init: std.process.Init) !void {
-    try run(init);
+    run(init) catch |err| {
+        const message = config.errorMessage(err) orelse @errorName(err);
+        const line = std.fmt.allocPrint(init.arena.allocator(), "{s}\n", .{message}) catch message;
+        writeErr(init.io, line) catch {};
+        std.process.exit(1);
+    };
 }
