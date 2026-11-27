@@ -131,47 +131,116 @@ timeout "${boot_timeout}s" qemu-system-x86_64 "${kvm[@]}" -m 4096 -smp 2 -nograp
   -drive "if=pflash,format=raw,readonly=on,file=$ovmf" \
   -drive "if=pflash,format=raw,file=$boot_vars" \
   -boot order=c -drive "file=$disk,if=virtio,format=qcow2" \
+  -smbios 'type=11,value=io.systemd.credential:mjolnir.boot-report=1' \
   -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
   -serial mon:stdio >"$log2" 2>&1 || true
 echo "second boot log captured: $log2"
 echo "checking target boot signals in $log2"
 
+image="${IMAGE:-$(
+  python3 - "$root/tests/ci-install.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as config:
+    print(json.load(config)["image"])
+PY
+)}"
+
 status=0
+pass() {
+  printf 'PASS: %s\n' "$1"
+}
+fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  status=1
+}
+
+# The opt-in boot-report unit prints bootc status JSON to /dev/console when the
+# SMBIOS credential above is present. A missing or wrong digest fails the run.
+if bootc_status="$(
+  python3 - "$log2" "$image" <<'PY'
+import json
+import sys
+
+log_path, expected = sys.argv[1:]
+with open(log_path, encoding="utf-8", errors="replace") as stream:
+    log = stream.read()
+repository, expected_digest = expected.split("@", 1)
+decoder = json.JSONDecoder()
+index = 0
+while True:
+    marker = log.find('"apiVersion"', index)
+    if marker < 0:
+        break
+    start = log.rfind("{", 0, marker)
+    if start >= 0:
+        try:
+            report, _ = decoder.raw_decode(log[start:])
+        except ValueError:
+            pass
+        else:
+            booted = (report.get("status") or {}).get("booted") or {}
+            image_status = booted.get("image") or {}
+            digest = image_status.get("imageDigest")
+            reference = (image_status.get("image") or {}).get("image")
+            if digest == expected_digest and isinstance(reference, str) and reference.startswith(repository):
+                print(digest)
+                sys.exit(0)
+    index = marker + 1
+print(f"no bootc status JSON for {expected} in {log_path}", file=sys.stderr)
+sys.exit(1)
+PY
+)"; then
+  pass "bootc status reports pinned image $bootc_status"
+else
+  fail "bootc status does not report pinned image $image"
+fi
 
 # The signed UKI cmdline carries composefs arguments; the installer ISO does
 # not. Mjolnir no longer carries systemd.firstboot=no.
 uki_cmdline="$(grep -a 'Command line:' "$log2" | head -n 1 || true)"
 for needle in 'console=ttyS0' 'composefs.digest=' 'composefs='; do
   if printf '%s\n' "$uki_cmdline" | grep -aqF "$needle"; then
-    echo "target boot: UKI cmdline has '$needle'"
+    pass "target boot: UKI cmdline has '$needle'"
   else
-    echo "target boot: UKI cmdline missing '$needle'" >&2
-    status=1
+    fail "target boot: UKI cmdline missing '$needle'"
   fi
 done
 
 # Mjolnir has no serial getty, so no login prompt appears. Local File Systems
 # shows the installed userspace started after switch-root.
 if grep -aqF 'Reached target Local File Systems' "$log2"; then
-  echo "target boot: reached Local File Systems"
+  pass "target boot: reached Local File Systems"
 else
-  echo "target boot: did not reach Local File Systems" >&2
-  status=1
+  fail "target boot: did not reach Local File Systems"
 fi
 
 if installer_lines="$(grep -anF 'Gram installer' "$log2" | cut -d: -f1 | paste -sd, -)"; then
-  echo "target boot: live ISO booted again (line $installer_lines)" >&2
-  status=1
+  fail "target boot: live ISO booted again (line $installer_lines)"
 else
-  echo "target boot: no live ISO installer"
+  pass "target boot: no live ISO installer"
 fi
 
 if fault_lines="$(grep -aEin 'kernel panic|call trace' "$log2")"; then
-  echo "target boot: kernel panic or Call Trace detected" >&2
+  fail "target boot: kernel panic or Call Trace detected"
   printf '%s\n' "$fault_lines" >&2
-  status=1
 else
-  echo "target boot: no kernel panic or Call Trace"
+  pass "target boot: no kernel panic or Call Trace"
+fi
+
+if fault_lines="$(grep -aEin '\[ *FAILED *\]|Failed to start' "$log2")"; then
+  fail "target boot: failed systemd units at boot"
+  printf '%s\n' "$fault_lines" >&2
+else
+  pass "target boot: no failed systemd units"
+fi
+
+if fault_lines="$(grep -aEin 'Kernel panic|Oops|BUG:|Call Trace|DM_VERITY|I/O error' "$log2")"; then
+  fail "target boot: critical kernel messages"
+  printf '%s\n' "$fault_lines" >&2
+else
+  pass "target boot: no critical kernel messages"
 fi
 
 echo "install log: $log1"

@@ -34,6 +34,60 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Install cosign
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        with:
+          cosign-release: v2.5.3
+      - name: Verify image signature and SLSA provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$(python3 - <<'PY'
+          import json
+
+          with open('tests/ci-install.json', encoding='utf-8') as config:
+              print(json.load(config)['image'])
+          PY
+          )"
+          # Keep this regex in sync with src/profile.zig. The image is signed
+          # with the legacy bundle format; attestations use the new format.
+          identity='^https://github\.com/HuntedRaven7/Mjolnir/\.github/workflows/build\.yml@refs/heads/(testing|gh-readonly-queue/testing/.+)$'
+          issuer='https://token.actions.githubusercontent.com'
+          cosign verify --new-bundle-format=false \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer "$issuer" "$image"
+          echo "PASS: cosign signature for $image"
+          cosign verify-attestation --new-bundle-format=true \
+            --type https://slsa.dev/provenance/v1 \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer "$issuer" "$image" > /tmp/gram-provenance.json
+          python3 - /tmp/gram-provenance.json "$image" <<'PY'
+          import base64
+          import json
+          import sys
+
+          path, expected = sys.argv[1:]
+          repository, digest = expected.split('@', 1)
+          subject_digest = digest.removeprefix('sha256:')
+          with open(path, encoding='utf-8') as stream:
+              text = stream.read()
+          decoder = json.JSONDecoder()
+          index = 0
+          while index < len(text):
+              while index < len(text) and text[index].isspace():
+                  index += 1
+              if index == len(text):
+                  break
+              envelope, index = decoder.raw_decode(text, index)
+              statement = json.loads(base64.b64decode(envelope['payload']))
+              if statement.get('predicateType') != 'https://slsa.dev/provenance/v1':
+                  raise SystemExit(f"wrong predicate type: {statement.get('predicateType')}")
+              for subject in statement.get('subject', []):
+                  if subject.get('name') == repository and subject.get('digest', {}).get('sha256') == subject_digest:
+                      print(f'PASS: SLSA provenance subject digest {digest}')
+                      sys.exit(0)
+          raise SystemExit(f'no SLSA provenance subject for {expected}')
+          PY
       - name: Install target and boot it
         run: ./scripts/vm-install-test.sh
       - name: Upload serial logs

@@ -21,14 +21,20 @@ const uki_dir = mount_point ++ "/EFI/Linux/bootc";
 const loader_dir = mount_point ++ "/EFI/BOOT";
 const composefs_karg = "composefs=";
 const mismatch_prefix = "composefs digest mismatch: embedded=";
+const uki_cmdline_prefix = "gram-verify: uki-cmdline=";
+const max_cmdline_bytes = 16 * 1024;
 
-fn diag(io: std.Io, comptime fmt: []const u8, args: anytype) void {
-    var buf: [512]u8 = undefined;
-    const line = std.fmt.bufPrint(&buf, "verify: " ++ fmt ++ "\n", args) catch return;
+fn report(io: std.Io, comptime fmt: []const u8, args: anytype) void {
+    var buf: [1024]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, fmt ++ "\n", args) catch return;
     std.debug.print("{s}", .{line});
     const console = std.Io.Dir.openFileAbsolute(io, "/dev/console", .{ .mode = .write_only }) catch return;
     defer console.close(io);
     console.writeStreamingAll(io, line) catch return;
+}
+
+fn diag(io: std.Io, comptime fmt: []const u8, args: anytype) void {
+    report(io, "verify: " ++ fmt, args);
 }
 
 pub const ComposefsDigests = struct {
@@ -83,6 +89,72 @@ fn hasEfiFile(io: std.Io, path: []const u8) bool {
         if (std.mem.endsWith(u8, entry.name, ".efi") or std.mem.endsWith(u8, entry.name, ".EFI")) return true;
     }
     return false;
+}
+
+fn firstEfiName(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !?[]u8 {
+    var dir = std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true }) catch return null;
+    defer dir.close(io);
+    var it = dir.iterate();
+    while (it.next(io) catch return null) |entry| {
+        if (entry.kind != .file) continue;
+        if (std.mem.endsWith(u8, entry.name, ".efi") or std.mem.endsWith(u8, entry.name, ".EFI")) {
+            return try allocator.dupe(u8, entry.name);
+        }
+    }
+    return null;
+}
+
+const PeSection = struct {
+    offset: u32,
+    size: u32,
+};
+
+/// Look up the .cmdline section in a PE section table. `table` starts at the
+/// first 40-byte section header, after the PE signature and COFF header.
+fn findCmdlineSection(table: []const u8, count: u16) ?PeSection {
+    if (table.len < @as(usize, count) * 40) return null;
+    for (0..count) |i| {
+        const entry = table[i * 40 ..][0..40];
+        if (!std.mem.eql(u8, entry[0..8], ".cmdline")) continue;
+        return .{
+            .offset = std.mem.readInt(u32, entry[20..24], .little),
+            .size = std.mem.readInt(u32, entry[16..20], .little),
+        };
+    }
+    return null;
+}
+
+/// Read the plain-text .cmdline section of a signed UKI. Only the PE headers
+/// and that one section are read; the rest of the UKI is left untouched.
+fn readUkiCmdline(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]u8 {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+
+    var dos: [64]u8 = undefined;
+    if (try file.readPositionalAll(io, &dos, 0) != dos.len) return error.InvalidUki;
+    if (dos[0] != 'M' or dos[1] != 'Z') return error.InvalidUki;
+    const pe_at = std.mem.readInt(u32, dos[0x3c..][0..4], .little);
+
+    var pe: [24]u8 = undefined;
+    if (try file.readPositionalAll(io, &pe, pe_at) != pe.len) return error.InvalidUki;
+    if (!std.mem.eql(u8, pe[0..4], "PE\x00\x00")) return error.InvalidUki;
+    const count = std.mem.readInt(u16, pe[6..8], .little);
+    if (count == 0 or count > 96) return error.InvalidUki;
+
+    const table_len = @as(usize, count) * 40;
+    const table = try allocator.alloc(u8, table_len);
+    defer allocator.free(table);
+    if (try file.readPositionalAll(io, table, @as(u64, pe_at) + 24) != table_len) return error.InvalidUki;
+    const section = findCmdlineSection(table, count) orelse return error.MissingUkiCmdline;
+    if (section.size == 0 or section.size > max_cmdline_bytes) return error.InvalidUki;
+
+    const raw = try allocator.alloc(u8, section.size);
+    defer allocator.free(raw);
+    if (try file.readPositionalAll(io, raw, section.offset) != raw.len) return error.InvalidUki;
+    const end = std.mem.indexOfScalar(u8, raw, 0) orelse raw.len;
+    const text = std.mem.trim(u8, raw[0..end], " \t\r\n");
+    if (text.len == 0) return error.MissingUkiCmdline;
+    return allocator.dupe(u8, text);
 }
 
 const Layout = struct {
@@ -192,6 +264,18 @@ pub fn verifyWithComposefs(
     }
 
     if (require_uki) {
+        const uki_name = (try firstEfiName(allocator, r.io, uki_dir)) orelse return error.MissingUki;
+        defer allocator.free(uki_name);
+        const uki_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ uki_dir, uki_name });
+        defer allocator.free(uki_path);
+        const cmdline = readUkiCmdline(allocator, r.io, uki_path) catch |err| {
+            diag(r.io, "cannot read signed UKI cmdline: {s}", .{@errorName(err)});
+            return err;
+        };
+        defer allocator.free(cmdline);
+        // A stable prefix lets the CI install log prove which cmdline the
+        // installer accepted from the signed UKI before the target reboots.
+        report(r.io, uki_cmdline_prefix ++ "{s}", .{cmdline});
         if (composefs) |digests| try verifyComposefs(r, digests);
     }
     diag(r.io, "checks passed", .{});
@@ -324,4 +408,49 @@ test "matching composefs digest passes verification" {
 
     try verifyComposefs(&r, .{ .embedded_cmdline = embedded_cmdline, .computed = digest });
     try std.testing.expectEqual(@as(usize, 0), r.log.items.len);
+}
+
+test "PE section lookup matches .cmdline exactly and uses raw offsets" {
+    var table: [40]u8 = [_]u8{0} ** 40;
+    @memcpy(table[0..8], ".cmdlinX");
+    std.mem.writeInt(u32, table[16..20], 0x80, .little);
+    std.mem.writeInt(u32, table[20..24], 0x1000, .little);
+    try std.testing.expect(findCmdlineSection(&table, 1) == null);
+
+    @memcpy(table[0..8], ".cmdline");
+    const section = findCmdlineSection(&table, 1).?;
+    try std.testing.expectEqual(@as(u32, 0x1000), section.offset);
+    try std.testing.expectEqual(@as(u32, 0x80), section.size);
+}
+
+test "signed UKI cmdline comes from the PE .cmdline section" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    var image: [0x1020]u8 = [_]u8{0} ** 0x1020;
+    image[0] = 'M';
+    image[1] = 'Z';
+    std.mem.writeInt(u32, image[0x3c..][0..4], 0x80, .little);
+    @memcpy(image[0x80..0x84], "PE\x00\x00");
+    std.mem.writeInt(u16, image[0x86..0x88], 1, .little);
+
+    const table = image[0x98..0xc0];
+    @memcpy(table[0..8], ".cmdline");
+    std.mem.writeInt(u32, table[16..20], 0x20, .little);
+    std.mem.writeInt(u32, table[20..24], 0x1000, .little);
+
+    const cmd = "console=ttyS0 composefs=abc123";
+    @memcpy(image[0x1000 .. 0x1000 + cmd.len], cmd);
+    image[0x1000 + cmd.len] = 0;
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "uki.efi", .data = &image });
+    const path = try tempEspPath(allocator, &tmp, "uki.efi");
+    defer allocator.free(path);
+
+    const cmdline = try readUkiCmdline(allocator, io, path);
+    defer allocator.free(cmdline);
+    try std.testing.expectEqualStrings(cmd, cmdline);
+    try std.testing.expectEqualStrings("abc123", parseComposefsDigest(cmdline).?);
 }
