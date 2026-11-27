@@ -69,3 +69,34 @@ test "Mjolnir dry-run has no kargs and persists the machine ID; Muramasa keeps i
     try std.testing.expect(std.mem.indexOf(u8, muramasa_run.log.items, "--karg=quiet") != null);
     try std.testing.expect(std.mem.indexOf(u8, muramasa_run.log.items, try std.fmt.allocPrint(allocator, "--karg=systemd.machine_id={s}", .{id})) != null);
 }
+
+test "dry-run verifies each profile image signature before pulling" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const id = "00000000-0000-4000-8000-000000000000";
+
+    var c = config.defaults();
+    c.disk = "/dev/vda";
+
+    for ([_][]const u8{ "Mjolnir", "Muramasa" }, 0..) |repo, i| {
+        if (i != 0) config.applyProfile(&c, .muramasa);
+        const p = try plan.build(allocator, c, id);
+        var r = runner.Runner.init(allocator, std.testing.io, true);
+        defer r.deinit();
+        try execute.execute(allocator, &r, p.actions, quiet);
+
+        const log = r.log.items;
+        const verify_pos = std.mem.indexOf(u8, log, "[dry-run] cosign verify --certificate-identity-regexp ");
+        try std.testing.expect(verify_pos != null);
+        const pull_pos = std.mem.indexOf(u8, log, "podman --root /var/lib/containers/storage --runroot /var/lib/containers/runroot pull ");
+        try std.testing.expect(pull_pos != null);
+        try std.testing.expect(verify_pos.? < pull_pos.?);
+
+        const end = std.mem.indexOfScalarPos(u8, log, verify_pos.?, '\n') orelse log.len;
+        const line = log[verify_pos.?..end];
+        try std.testing.expect(std.mem.indexOf(u8, line, repo) != null);
+        try std.testing.expect(std.mem.indexOf(u8, line, "--certificate-oidc-issuer https://token.actions.githubusercontent.com") != null);
+        try std.testing.expect(std.mem.indexOf(u8, line, c.image) != null);
+    }
+}
