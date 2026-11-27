@@ -1,6 +1,17 @@
 const std = @import("std");
 const profile_mod = @import("profile.zig");
 
+/// A credential staged for the installed state partition. Values come only
+/// from credential sources; they are never parsed from JSON or CLI flags.
+pub const CredentialValue = struct {
+    name: []const u8,
+    value: []const u8,
+};
+
+pub const StagedCredentials = struct {
+    values: []const CredentialValue = &.{},
+};
+
 pub const Config = struct {
     profile: profile_mod.Id = .mjolnir,
     image: []const u8 = "",
@@ -20,6 +31,8 @@ pub const Config = struct {
     yes: bool = false,
     dry_run: bool = false,
     machine_id: []const u8 = "",
+    // Populated by cli.prepare from credential sources, never from JSON or flags.
+    staged_credentials: StagedCredentials = .{},
 };
 
 const Json = struct {

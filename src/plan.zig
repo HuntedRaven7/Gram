@@ -32,6 +32,12 @@ pub const PersistMachineId = struct {
     state_label: ?[]const u8,
 };
 
+pub const PersistCredentials = struct {
+    label: []const u8,
+    values: []const config_mod.CredentialValue,
+    state_label: ?[]const u8,
+};
+
 pub const WipePartitions = struct {
     label: []const u8,
     disk: []const u8,
@@ -48,6 +54,7 @@ pub const Action = union(enum) {
     write_file: WriteFile,
     persist_wifi: PersistWifi,
     persist_machine_id: PersistMachineId,
+    persist_credentials: PersistCredentials,
     verify_signature: signature_mod.Verification,
     wipe_partitions: WipePartitions,
     verify: Verify,
@@ -253,6 +260,13 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
             .machine_id = machine_id,
             .state_label = p.state_label,
         } });
+        if (c.staged_credentials.values.len != 0) {
+            try actions.append(allocator, .{ .persist_credentials = .{
+                .label = "persist Mjolnir credentials in target state partition",
+                .values = c.staged_credentials.values,
+                .state_label = p.state_label,
+            } });
+        }
     }
 
     if (c.ssid.len != 0) {

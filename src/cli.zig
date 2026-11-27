@@ -1,5 +1,6 @@
 const std = @import("std");
 const config_mod = @import("config.zig");
+const credentials_mod = @import("credentials.zig");
 const profile_mod = @import("profile.zig");
 const disk_mod = @import("disk.zig");
 const plan_mod = @import("plan.zig");
@@ -111,6 +112,12 @@ pub fn prepare(allocator: std.mem.Allocator, io: std.Io, env: *const std.process
     c.registry_token = try config_mod.secret(allocator, io, env, c.registry_token, "registry-token");
     c.ssid = try config_mod.secret(allocator, io, env, c.ssid, "wifi-ssid");
     c.psk = try config_mod.secret(allocator, io, env, c.psk, "wifi-psk");
+
+    // Mjolnir provisioning credentials are read only from credential sources.
+    // Muramasa keeps its own set and never reads these names.
+    if (c.profile == .mjolnir) {
+        c.staged_credentials = try credentials_mod.ingest(allocator, io, env, r);
+    }
 
     const json = try r.output(&.{ "lsblk", "-J", "-d", "-o", "PATH,SIZE,TYPE,MODEL,SERIAL,TRAN,RM,MOUNTPOINT" });
     const cmdline = try std.Io.Dir.cwd().readFileAlloc(io, "/proc/cmdline", allocator, .unlimited);

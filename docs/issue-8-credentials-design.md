@@ -8,6 +8,12 @@ Provisioning obtains a fresh token. Gram reads the supplied credentials and writ
 
 The decision is resolved from available evidence. Reversing it requires a Mjolnir change, so that path stays out of scope for issue 8.
 
+## Current change: Gram side only
+
+This change stages a recovery copy of the six credentials into the `MjolnirState` partition at `etc/mjolnir/credentials/<name>` with mode 0600. It does not make a worker join on first boot, and it does not close issue 8.
+
+The image-side gap remains: Mjolnir's units read credentials only from `$CREDENTIALS_DIRECTORY`, `/run/credentials/mjolnir/` and `/run/credentials/@system/`. There is no reader for a persisted path. Gram staging alone therefore does not supply a join token to `mjolnir-join.service`. A follow-up Mjolnir change must add `LoadCredential=` bindings that point at the persistent path before a staged token becomes the first boot source. Until then the persisted files are a recovery copy for an operator to consume.
+
 ## Evidence
 
 Mjolnir `docs/PROVISIONING.md` lists the required credentials and says join credentials are required on workers and ignored on the control plane. Its first boot sequence has `mjolnir-join.service` run `kubeadm join` with the token.
@@ -50,7 +56,7 @@ Gram validates token format. It cannot validate freshness, because the expiry is
 
 A stale token makes `mjolnir-join.service` restart and fail. Recovery is an operator token rotation through `RotateJoinToken` followed by a new provisioning credential.
 
-The persisted credentials are a recovery copy. At first boot the consuming units still read credentials from `$CREDENTIALS_DIRECTORY` or `/run/credentials/@system/`, as Mjolnir documents. Making the persisted copy the first boot source needs a Mjolnir unit change, such as `LoadCredential=` with a persistent path. That change is a follow-up, not part of issue 8.
+The persisted credentials are a recovery copy. At first boot the consuming units still read credentials from `$CREDENTIALS_DIRECTORY`, `/run/credentials/mjolnir/` or `/run/credentials/@system/`, as Mjolnir documents. Making the persisted copy the first boot source needs a Mjolnir unit change, such as `LoadCredential=` with a persistent path. That change is a follow-up, not part of issue 8. Gram does not add those bindings and the issue stays open.
 
 ## Implementation plan
 
