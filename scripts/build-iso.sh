@@ -6,11 +6,14 @@ BUILD="$ROOT/build/iso"
 OUT="$ROOT/dist"
 ARCH="${ARCH:-amd64}"
 ZIG="${ZIG:-zig}"
-BASE_IMAGE="${BASE_IMAGE:-quay.io/fedora/fedora-bootc@sha256:840da31a3e3e8055a8d1c8c0f378e66e5c7de6ebe39037bbf7e5b252f138f04d}"
+BASE_IMAGE="${BASE_IMAGE:-quay.io/fedora/fedora-bootc@sha256:0c5882dac9fbf76e285e816217c0a931c4b5e1236d56bd071bc723743b025299}"
 BOOT_EFI="$([ "$ARCH" = arm64 ] && echo BOOTAA64.EFI || echo BOOTX64.EFI)"
 
 for tool in "$ZIG" podman mformat mcopy mmd mksquashfs xorriso tar; do
-  command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
+  command -v "$tool" >/dev/null || {
+    echo "missing tool: $tool" >&2
+    exit 1
+  }
 done
 
 rm -rf "$BUILD"
@@ -18,7 +21,7 @@ mkdir -p "$BUILD"/{esp/EFI/BOOT,esp/loader/entries,esp/LiveOS,squashfs/etc,squas
 mkdir -p "$OUT"
 
 echo "==> building static installer"
-"$ZIG" build --prefix "$BUILD/gram-prefix" -Doptimize=ReleaseSafe
+"$ZIG" build --prefix "$BUILD/gram-prefix" -Doptimize=ReleaseSafe -Dcpu=baseline
 install -m 0755 "$BUILD/gram-prefix/bin/gram" "$BUILD/squashfs/usr/local/bin/gram"
 
 echo "==> staging live root from $BASE_IMAGE"
@@ -40,6 +43,25 @@ install -Dm644 "$ROOT/iso/gram-installer.service" \
 ln -sf ../gram-installer.service \
   "$ROOTFS/usr/lib/systemd/system/multi-user.target.wants/gram-installer.service"
 
+if [ -n "${GRAM_CI_CONFIG:-}" ]; then
+  install -Dm644 "$GRAM_CI_CONFIG" "$ROOTFS/etc/gram/install.json"
+  mkdir -p "$ROOTFS/usr/lib/systemd/journald.conf.d"
+  cat >"$ROOTFS/usr/lib/systemd/journald.conf.d/10-gram-ci.conf" <<'JOURNAL'
+[Journal]
+ForwardToConsole=yes
+ConsoleLevel=debug
+JOURNAL
+  sed -i \
+    -e 's|^ExecStart=.*|ExecStart=/usr/local/bin/gram --yes --config /etc/gram/install.json|' \
+    -e 's|^TTYPath=.*|TTYPath=/dev/ttyS0|' \
+    -e '/^TTYReset=/d' \
+    -e '/^TTYVHangup=/d' \
+    -e 's|^StandardInput=.*|StandardInput=null|' \
+    -e 's|^StandardOutput=.*|StandardOutput=tty|' \
+    -e 's|^StandardError=.*|StandardError=tty|' \
+    "$ROOTFS/usr/lib/systemd/system/gram-installer.service"
+fi
+
 # The bootc base ships NetworkManager; install wpa_supplicant if absent. Live
 # WiFi is handled by nmcli, so the daemon is required for scanning and WPA.
 if ! podman exec "$CID" sh -c 'command -v wpa_supplicant' >/dev/null 2>&1; then
@@ -57,7 +79,10 @@ echo "==> building initramfs with dracut"
 # stays out of the final squashfs because only the initramfs is copied out.
 podman exec "$CID" sh -c 'mkdir -p /var/roothome && dnf install -y dracut-live systemd-boot' >/dev/null
 KVER=$(podman exec "$CID" sh -c 'ls /usr/lib/modules | head -n1')
-[ -n "$KVER" ] || { echo "no kernel version in base image" >&2; exit 1; }
+[ -n "$KVER" ] || {
+  echo "no kernel version in base image" >&2
+  exit 1
+}
 podman exec "$CID" sh -c "dracut --no-hostonly --kver '$KVER' --add 'dmsquash-live img-lib' --add-drivers isofs --force /tmp/initramfs.img"
 podman cp "$CID:/tmp/initramfs.img" "$BUILD/esp/initrd.img"
 podman cp "$CID:/usr/lib/modules/$KVER/vmlinuz" "$BUILD/esp/vmlinuz"
@@ -66,14 +91,14 @@ echo "==> assembling EFI system partition"
 BOOT_SOURCE="${SYSTEMD_BOOT_EFI:-/usr/lib/systemd/boot/efi/systemd-boot$([ "$ARCH" = arm64 ] && echo aa64 || echo x64).efi}"
 podman cp "$CID:$BOOT_SOURCE" "$BUILD/esp/EFI/BOOT/$BOOT_EFI"
 
-cat > "$BUILD/esp/loader/loader.conf" <<'EOF'
+cat >"$BUILD/esp/loader/loader.conf" <<'EOF'
 default gram
 timeout 5
 editor no
 EOF
 # selinux=0: the squashfs-backed live root cannot carry the xattrs that the
 # target image's SELinux policy expects.
-cat > "$BUILD/esp/loader/entries/gram.conf" <<'EOF'
+cat >"$BUILD/esp/loader/entries/gram.conf" <<'EOF'
 title Gram installer
 linux /vmlinuz
 initrd /initrd.img
@@ -84,7 +109,7 @@ EFI_IMG="$BUILD/esp/efi.img"
 truncate -s 192M "$EFI_IMG"
 mformat -i "$EFI_IMG" -F ::
 mmd -i "$EFI_IMG" ::EFI ::EFI/BOOT ::loader ::loader/entries
-mcopy -i "$EFI_IMG" "$BUILD/esp/EFI/BOOT/$BOOT_EFI" ::EFI/BOOT/$BOOT_EFI
+mcopy -i "$EFI_IMG" "$BUILD/esp/EFI/BOOT/$BOOT_EFI" ::EFI/BOOT/"$BOOT_EFI"
 mcopy -i "$EFI_IMG" "$BUILD/esp/loader/loader.conf" ::loader/loader.conf
 mcopy -i "$EFI_IMG" "$BUILD/esp/loader/entries/gram.conf" ::loader/entries/gram.conf
 mcopy -i "$EFI_IMG" "$BUILD/esp/vmlinuz" ::vmlinuz

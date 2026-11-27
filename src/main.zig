@@ -9,6 +9,7 @@ const execute = @import("execute.zig");
 const verify = @import("verify.zig");
 const cli = @import("cli.zig");
 const tui = @import("tui.zig");
+const tests = @import("tests.zig");
 
 comptime {
     _ = profile;
@@ -18,6 +19,7 @@ comptime {
     _ = plan;
     _ = execute;
     _ = verify;
+    _ = tests;
 }
 
 fn writeOut(io: std.Io, text: []const u8) !void {
@@ -36,7 +38,6 @@ fn writeErr(io: std.Io, text: []const u8) !void {
 
 fn run(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
-    execute.setIo(init.io);
     var it = std.process.Args.Iterator.init(init.minimal.args);
     defer it.deinit();
     var args: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -60,7 +61,11 @@ fn run(init: std.process.Init) !void {
         opts.profile != null or opts.image != null or opts.disk != null;
     if (headless) {
         try cli.apply(allocator, init.io, prepared.config, &r, execute.printStdout);
-        try writeOut(init.io, r.log.items);
+        // The install already succeeded. Mirroring the captured command log is
+        // diagnostic output; a failed console write must not fail the install.
+        writeOut(init.io, r.log.items) catch |err| {
+            std.debug.print("gram: could not mirror command log: {s}\n", .{@errorName(err)});
+        };
         return;
     }
 

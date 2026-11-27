@@ -6,6 +6,7 @@ const Raw = struct {
     type: []const u8,
     fstype: ?[]const u8 = null,
     label: ?[]const u8 = null,
+    children: []Raw = &.{},
 };
 
 const Lsblk = struct {
@@ -13,9 +14,23 @@ const Lsblk = struct {
 };
 
 const mount_point = "/mnt/gram-verify-esp";
+// The composefs backend keeps UKIs one level below EFI/Linux so systemd-boot
+// shows only the BLS entries in its menu. Gram must check that directory, not
+// the parent, which holds only the `bootc` subdirectory.
+const uki_dir = mount_point ++ "/EFI/Linux/bootc";
+const loader_dir = mount_point ++ "/EFI/BOOT";
+
+fn diag(io: std.Io, comptime fmt: []const u8, args: anytype) void {
+    var buf: [512]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "verify: " ++ fmt ++ "\n", args) catch return;
+    std.debug.print("{s}", .{line});
+    const console = std.Io.Dir.openFileAbsolute(io, "/dev/console", .{ .mode = .write_only }) catch return;
+    defer console.close(io);
+    console.writeStreamingAll(io, line) catch return;
+}
 
 fn hasEfiFile(io: std.Io, path: []const u8) bool {
-    var dir = std.Io.Dir.openDirAbsolute(io, path, .{}) catch return false;
+    var dir = std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true }) catch return false;
     defer dir.close(io);
     var it = dir.iterate();
     while (it.next(io) catch return false) |entry| {
@@ -25,47 +40,192 @@ fn hasEfiFile(io: std.Io, path: []const u8) bool {
     return false;
 }
 
+const Layout = struct {
+    esp: ?[]const u8 = null,
+    root: ?[]const u8 = null,
+};
+
+fn collectParts(allocator: std.mem.Allocator, raw: Raw, list: *std.ArrayListUnmanaged(Raw)) !void {
+    if (std.mem.eql(u8, raw.type, "part")) try list.append(allocator, raw);
+    for (raw.children) |child| try collectParts(allocator, child, list);
+}
+
+// lsblk prints partitions as direct entries on some util-linux versions and as
+// children of the disk on others. Both shapes must describe the installed disk.
+fn onDisk(path: []const u8, disk: []const u8) bool {
+    if (!std.mem.startsWith(u8, path, disk)) return false;
+    if (path.len == disk.len) return false;
+    const next = path[disk.len];
+    return std.ascii.isDigit(next) or next == 'p';
+}
+
+fn scanLayout(parts: []const Raw, disk: []const u8) Layout {
+    var layout: Layout = .{};
+    for (parts) |part| {
+        if (!std.mem.eql(u8, part.type, "part")) continue;
+        if (!onDisk(part.path, disk)) continue;
+        const fs = part.fstype orelse "";
+        if (layout.esp == null and std.mem.eql(u8, fs, "vfat")) layout.esp = part.path;
+        if (layout.root == null and (std.mem.eql(u8, fs, "btrfs") or std.mem.eql(u8, fs, "xfs") or std.mem.eql(u8, fs, "ext4"))) layout.root = part.path;
+    }
+    return layout;
+}
+
+fn shown(value: ?[]const u8) []const u8 {
+    return value orelse "none";
+}
+
 pub fn verify(allocator: std.mem.Allocator, r: *runner_mod.Runner, disk: []const u8, require_uki: bool) !void {
     if (r.dry_run) return;
-    const text = try r.output(&.{ "lsblk", "-J", "-o", "PATH,TYPE,FSTYPE,LABEL", disk });
+    diag(r.io, "entry disk={s} require_uki={}", .{ disk, require_uki });
+    // Query all block devices, as execute.findState does. Passing a device to
+    // lsblk can yield no rows after bootc unmounts the target filesystems.
+    const text = r.output(&.{ "lsblk", "-J", "-o", "PATH,TYPE,FSTYPE,LABEL" }) catch |err| {
+        diag(r.io, "lsblk failed: {s}", .{@errorName(err)});
+        return err;
+    };
     defer allocator.free(text);
+    diag(r.io, "lsblk bytes={d}", .{text.len});
+    if (text.len == 0) {
+        diag(r.io, "lsblk returned no data", .{});
+        return error.InstalledLayoutMissing;
+    }
+    const parsed = std.json.parseFromSlice(Lsblk, allocator, text, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    }) catch |err| {
+        diag(r.io, "lsblk JSON parse failed: {s}", .{@errorName(err)});
+        return err;
+    };
+    defer parsed.deinit();
+
+    var parts: std.ArrayListUnmanaged(Raw) = .empty;
+    defer parts.deinit(allocator);
+    for (parsed.value.blockdevices) |raw| try collectParts(allocator, raw, &parts);
+    diag(r.io, "parsed devices={d} partitions={d}", .{ parsed.value.blockdevices.len, parts.items.len });
+
+    const layout = scanLayout(parts.items, disk);
+    diag(r.io, "layout esp={s} root={s}", .{ shown(layout.esp), shown(layout.root) });
+    if (layout.esp == null) {
+        diag(r.io, "no vfat ESP partition on {s}", .{disk});
+        return error.InstalledLayoutMissing;
+    }
+    if (layout.root == null) {
+        diag(r.io, "no btrfs/xfs/ext4 root partition on {s}", .{disk});
+        return error.InstalledLayoutMissing;
+    }
+
+    try std.Io.Dir.cwd().createDirPath(r.io, mount_point);
+    defer std.Io.Dir.cwd().deleteDir(r.io, mount_point) catch {};
+    r.run(&.{ "mount", "-o", "ro", layout.esp.?, mount_point }) catch |err| {
+        diag(r.io, "cannot mount ESP {s} at {s}: {s}", .{ layout.esp.?, mount_point, @errorName(err) });
+        return err;
+    };
+    defer r.run(&.{ "umount", mount_point }) catch {};
+
+    if (require_uki and !hasEfiFile(r.io, uki_dir)) {
+        diag(r.io, "no .efi UKI in {s}", .{uki_dir});
+        return error.MissingUki;
+    }
+    if (!hasEfiFile(r.io, loader_dir)) {
+        diag(r.io, "no .efi systemd-boot loader in {s}", .{loader_dir});
+        return error.MissingBootLoader;
+    }
+    diag(r.io, "checks passed", .{});
+}
+
+fn tempEspPath(allocator: std.mem.Allocator, tmp: *const std.testing.TmpDir, suffix: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/{s}", .{ &tmp.sub_path, suffix });
+}
+
+test "bootc composefs UKI is under EFI/Linux/bootc, not directly in EFI/Linux" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    try tmp.dir.createDirPath(io, "EFI/Linux/bootc");
+    try tmp.dir.writeFile(io, .{ .sub_path = "EFI/Linux/bootc/4f2a.efi", .data = "signed uki" });
+    try tmp.dir.createDirPath(io, "EFI/BOOT");
+    try tmp.dir.writeFile(io, .{ .sub_path = "EFI/BOOT/BOOTX64.EFI", .data = "loader" });
+
+    const efi_linux = try tempEspPath(allocator, &tmp, "EFI/Linux");
+    defer allocator.free(efi_linux);
+    const uki = try tempEspPath(allocator, &tmp, "EFI/Linux/bootc");
+    defer allocator.free(uki);
+    const loader = try tempEspPath(allocator, &tmp, "EFI/BOOT");
+    defer allocator.free(loader);
+
+    try std.testing.expect(!hasEfiFile(io, efi_linux));
+    try std.testing.expect(hasEfiFile(io, uki));
+    try std.testing.expect(hasEfiFile(io, loader));
+}
+
+test "an empty bootc directory still fails both EFI checks" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+
+    try tmp.dir.createDirPath(io, "EFI/Linux/bootc");
+    try tmp.dir.writeFile(io, .{ .sub_path = "EFI/Linux/bootc/notes.txt", .data = "not a UKI" });
+    try tmp.dir.createDirPath(io, "EFI/BOOT");
+    try tmp.dir.writeFile(io, .{ .sub_path = "EFI/BOOT/loader.conf", .data = "not a loader" });
+
+    const uki = try tempEspPath(allocator, &tmp, "EFI/Linux/bootc");
+    defer allocator.free(uki);
+    const loader = try tempEspPath(allocator, &tmp, "EFI/BOOT");
+    defer allocator.free(loader);
+
+    try std.testing.expect(!hasEfiFile(io, uki));
+    try std.testing.expect(!hasEfiFile(io, loader));
+}
+
+test "installed Mjolnir disk layout classifies the vfat ESP and ext4 root" {
+    const text =
+        \\{"blockdevices":[
+        \\{"path":"/dev/vda","type":"disk","fstype":null,"label":null},
+        \\{"path":"/dev/vda1","type":"part","fstype":null,"label":null},
+        \\{"path":"/dev/vda2","type":"part","fstype":"vfat","label":"EFI-SYSTEM"},
+        \\{"path":"/dev/vda3","type":"part","fstype":"ext4","label":"root"}
+        \\]}
+    ;
+    const parsed = try std.json.parseFromSlice(Lsblk, std.testing.allocator, text, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+    const layout = scanLayout(parsed.value.blockdevices, "/dev/vda");
+    try std.testing.expectEqualStrings("/dev/vda2", layout.esp.?);
+    try std.testing.expectEqualStrings("/dev/vda3", layout.root.?);
+}
+
+test "nested lsblk children are found and scoped to the selected disk" {
+    const text =
+        \\{"blockdevices":[
+        \\{"path":"/dev/vda","type":"disk","fstype":null,"label":null,"children":[
+        \\{"path":"/dev/vda1","type":"part","fstype":null,"label":null},
+        \\{"path":"/dev/vda2","type":"part","fstype":"vfat","label":"EFI-SYSTEM"},
+        \\{"path":"/dev/vda3","type":"part","fstype":"ext4","label":"root"}
+        \\]},
+        \\{"path":"/dev/vdb","type":"disk","fstype":null,"label":null,"children":[
+        \\{"path":"/dev/vdb1","type":"part","fstype":"vfat","label":"SCRATCH-ESP"}
+        \\]}
+        \\]}
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const parsed = try std.json.parseFromSlice(Lsblk, allocator, text, .{
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
     });
     defer parsed.deinit();
-
-    var esp: ?[]const u8 = null;
-    var root: ?[]const u8 = null;
-    for (parsed.value.blockdevices) |part| {
-        if (!std.mem.eql(u8, part.type, "part")) continue;
-        const fs = part.fstype orelse "";
-        if (esp == null and std.mem.eql(u8, fs, "vfat")) esp = part.path;
-        if (root == null and (std.mem.eql(u8, fs, "btrfs") or std.mem.eql(u8, fs, "xfs") or std.mem.eql(u8, fs, "ext4"))) root = part.path;
-    }
-    if (esp == null or root == null) return error.InstalledLayoutMissing;
-
-    try std.Io.Dir.cwd().createDirPath(r.io, mount_point);
-    defer std.Io.Dir.cwd().deleteDir(r.io, mount_point) catch {};
-    try r.run(&.{ "mount", "-o", "ro", esp.?, mount_point });
-    defer r.run(&.{ "umount", mount_point }) catch {};
-
-    if (require_uki and !hasEfiFile(r.io, mount_point ++ "/EFI/Linux")) {
-        return error.MissingUki;
-    }
-    if (!hasEfiFile(r.io, mount_point ++ "/EFI/BOOT")) {
-        return error.MissingBootLoader;
-    }
-}
-
-test "registry and layout expectations are checked on real output shape" {
-    const text =
-        \\{"blockdevices":[{"path":"/dev/vda","type":"disk","fstype":null,"label":null,"children":[
-        \\{"path":"/dev/vda1","type":"part","fstype":"vfat","label":null},
-        \\{"path":"/dev/vda2","type":"part","fstype":"btrfs","label":null}
-        \\]}]}
-    ;
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, text, .{});
-    defer parsed.deinit();
-    try std.testing.expect(parsed.value.object.get("blockdevices") != null);
+    var parts: std.ArrayListUnmanaged(Raw) = .empty;
+    defer parts.deinit(allocator);
+    for (parsed.value.blockdevices) |raw| try collectParts(allocator, raw, &parts);
+    try std.testing.expectEqual(@as(usize, 4), parts.items.len);
+    const layout = scanLayout(parts.items, "/dev/vda");
+    try std.testing.expectEqualStrings("/dev/vda2", layout.esp.?);
+    try std.testing.expectEqualStrings("/dev/vda3", layout.root.?);
 }

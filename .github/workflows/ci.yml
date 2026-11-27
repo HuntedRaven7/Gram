@@ -1,0 +1,113 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  zig:
+    name: zig
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+      - name: Build
+        run: zig build
+      - name: Test
+        run: zig build test
+      - name: Check formatting
+        run: zig fmt --check src build.zig
+      - name: Check dry-run goldens
+        run: ./scripts/check-dry-run.sh
+
+  shell:
+    name: shell
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install shell tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck skopeo
+          go install mvdan.cc/sh/v3/cmd/shfmt@v3.14.1
+      - name: Verify base image pin
+        run: ./scripts/check-base-pin.sh
+      - name: Run ShellCheck
+        run: shellcheck scripts/*.sh
+      - name: Check shell formatting
+        run: |
+          "$(go env GOPATH)/bin/shfmt" -i 2 -d scripts/*.sh
+
+  workflow-lint:
+    name: workflow-lint
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint workflows
+        uses: zizmorcore/zizmor-action@1b4550e929643b8b26a62303c6bd64814271a4f1 # v0.9.2
+        with:
+          advanced-security: false
+
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          version="8.30.1"
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          # Pinned release; checksum from gitleaks_8.30.1_checksums.txt.
+          checksum="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${version}"
+          curl -fsSL "${url}/${archive}" -o "${archive}"
+          echo "${checksum}  ${archive}" | sha256sum --check -
+          tar -xzf "${archive}" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+      - name: Scan for secrets
+        run: gitleaks git . --config .gitleaks.toml --no-banner
+
+  vm-boot:
+    name: vm-boot
+    runs-on: ubuntu-26.04
+    needs: zig
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build ISO
+        uses: $/.github/actions/build-iso
+      - name: Install QEMU and OVMF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Boot ISO and check installer service
+        run: ./scripts/vm-test.sh

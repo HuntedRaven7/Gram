@@ -1,0 +1,8 @@
+title = "Gram gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic WiFi PSK fixture used by the dry-run golden"
+paths = ['''tests/mjolnir\.json''']

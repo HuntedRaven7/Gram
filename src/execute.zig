@@ -5,12 +5,6 @@ const verify_mod = @import("verify.zig");
 
 const state_mount = "/mnt/gram-state";
 
-var print_io: std.Io = undefined;
-
-pub fn setIo(io: std.Io) void {
-    print_io = io;
-}
-
 const Raw = struct {
     path: []const u8,
     type: []const u8,
@@ -65,11 +59,18 @@ fn findState(allocator: std.mem.Allocator, r: *runner_mod.Runner, expected: ?[]c
     return null;
 }
 
-pub fn persistWifi(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: plan_mod.PersistWifi) !void {
+fn writeToState(
+    allocator: std.mem.Allocator,
+    r: *runner_mod.Runner,
+    rel_path: []const u8,
+    content: []const u8,
+    mode: u32,
+    state_label: ?[]const u8,
+    warning: []const u8,
+) !void {
     if (r.dry_run) return;
-    const dev = (try findState(allocator, r, p.state_label)) orelse {
-        if (p.required) return error.StatePartitionNotFound;
-        try r.record(try std.fmt.allocPrint(allocator, "warning: no state partition found, WiFi profile not persisted\n", .{}));
+    const dev = (try findState(allocator, r, state_label)) orelse {
+        try r.record(try std.fmt.allocPrint(allocator, "warning: {s}\n", .{warning}));
         return;
     };
     defer allocator.free(dev);
@@ -79,6 +80,11 @@ pub fn persistWifi(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: plan_
     try r.run(&.{ "mount", "-o", "rw", dev, state_mount });
     defer r.run(&.{ "umount", state_mount }) catch {};
 
+    const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ state_mount, rel_path });
+    try writeFile(r, path, content, mode);
+}
+
+pub fn persistWifi(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: plan_mod.PersistWifi) !void {
     const content = try std.fmt.allocPrint(allocator,
         \\[connection]
         \\id=gram-wifi
@@ -100,8 +106,12 @@ pub fn persistWifi(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: plan_
         \\method=auto
         \\
     , .{ p.ssid, p.psk });
-    const path = try std.fmt.allocPrint(allocator, "{s}/etc/NetworkManager/system-connections/gram-wifi.nmconnection", .{state_mount});
-    try writeFile(r, path, content, 0o600);
+    try writeToState(allocator, r, "etc/NetworkManager/system-connections/gram-wifi.nmconnection", content, 0o600, p.state_label, "no state partition found, WiFi profile not persisted");
+}
+
+pub fn persistMachineId(allocator: std.mem.Allocator, r: *runner_mod.Runner, p: plan_mod.PersistMachineId) !void {
+    const content = try std.fmt.allocPrint(allocator, "{s}\n", .{p.machine_id});
+    try writeToState(allocator, r, "etc/machine-id", content, 0o444, p.state_label, "no state partition found, machine ID not persisted");
 }
 
 fn note(r: *runner_mod.Runner, text: []const u8) !void {
@@ -109,16 +119,31 @@ fn note(r: *runner_mod.Runner, text: []const u8) !void {
     try r.record("\n");
 }
 
+fn traceLabel(r: *runner_mod.Runner, print: *const fn ([]const u8) void, buf: []u8, phase: []const u8, label: []const u8) !void {
+    const line = std.fmt.bufPrint(buf, "{s} {s}", .{ phase, label }) catch return;
+    try note(r, line);
+    print(line);
+}
+
 pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []plan_mod.Action, print: *const fn ([]const u8) void) !void {
+    var trace_buf: [256]u8 = undefined;
     for (actions) |action| {
         switch (action) {
             .command => |cmd| {
+                if (cmd.trace) try traceLabel(r, print, &trace_buf, "begin", cmd.label);
                 try note(r, cmd.label);
                 print(cmd.label);
-                r.run(cmd.argv) catch |err| {
+                const outcome = if (cmd.stdin) |input|
+                    r.runStdin(input, cmd.argv)
+                else
+                    r.run(cmd.argv);
+                outcome catch |err| {
+                    if (cmd.trace) try traceLabel(r, print, &trace_buf, "end", cmd.label);
                     if (!cmd.allow_fail) return err;
                     print("step failed, continuing");
+                    continue;
                 };
+                if (cmd.trace) try traceLabel(r, print, &trace_buf, "end", cmd.label);
             },
             .write_file => |wf| {
                 try note(r, wf.label);
@@ -130,6 +155,11 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
                 print(pw.label);
                 try persistWifi(allocator, r, pw);
             },
+            .persist_machine_id => |pm| {
+                try note(r, pm.label);
+                print(pm.label);
+                try persistMachineId(allocator, r, pm);
+            },
             .verify => |v| {
                 try note(r, v.label);
                 print(v.label);
@@ -140,9 +170,10 @@ pub fn execute(allocator: std.mem.Allocator, r: *runner_mod.Runner, actions: []p
 }
 
 pub fn printStdout(line: []const u8) void {
-    var buffer: [4096]u8 = undefined;
-    var writer = std.Io.File.stdout().writer(print_io, &buffer);
-    writer.interface.writeAll(line) catch return;
-    writer.interface.writeAll("\n") catch return;
-    writer.interface.flush() catch {};
+    std.debug.print("{s}\n", .{line});
+    const io = std.Options.debug_io;
+    const console = std.Io.Dir.openFileAbsolute(io, "/dev/console", .{ .mode = .write_only }) catch return;
+    defer console.close(io);
+    console.writeStreamingAll(io, line) catch return;
+    console.writeStreamingAll(io, "\n") catch return;
 }
