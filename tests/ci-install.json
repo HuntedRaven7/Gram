@@ -1,6 +1,6 @@
 {
   "profile": "mjolnir",
-  "image": "ghcr.io/huntedraven7/mjolnir@sha256:2eb34ed728e2dd2ea1d79477b8bd251a08671bdf7749717b6acdfa61d42af92b",
+  "image": "ghcr.io/huntedraven7/mjolnir@sha256:e664c7d7f4b053cd4c6a19c37ae26f61fb99683d4c3827ab5fd1579d18c8285c",
   "disk": "/dev/vda",
   "scratchDisk": "/dev/vdb",
   "hostname": "mjolnir-1",
