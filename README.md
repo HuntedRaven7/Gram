@@ -83,6 +83,8 @@ WiFi. Gram uses `nmcli` and a keyfile, as Mjolnir does. It writes the keyfile to
 
 TUI. Zigzag supplies the program, key events, and rendering. The wizard keeps one owner per field and sends the same `Plan` to the headless backend.
 
+Mjolnir credentials. Provisioning mints a fresh join token and supplies it as a systemd credential. Gram persists the supplied values in installed state and does not call Varlink. See [docs/issue-8-credentials-design.md](docs/issue-8-credentials-design.md).
+
 ## References
 
 The installer design came from these sources.
