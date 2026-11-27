@@ -1,6 +1,7 @@
 const std = @import("std");
 const config_mod = @import("config.zig");
 const profile_mod = @import("profile.zig");
+const signature_mod = @import("signature.zig");
 
 pub const Command = struct {
     label: []const u8,
@@ -31,6 +32,11 @@ pub const PersistMachineId = struct {
     state_label: ?[]const u8,
 };
 
+pub const WipePartitions = struct {
+    label: []const u8,
+    disk: []const u8,
+};
+
 pub const Verify = struct {
     label: []const u8,
     disk: []const u8,
@@ -42,6 +48,8 @@ pub const Action = union(enum) {
     write_file: WriteFile,
     persist_wifi: PersistWifi,
     persist_machine_id: PersistMachineId,
+    verify_signature: signature_mod.Verification,
+    wipe_partitions: WipePartitions,
     verify: Verify,
 };
 
@@ -169,6 +177,12 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         .argv = try dupeArgv(allocator, &.{ "df", "-h", scratch_tmp, container_root, "/run" }),
     } });
 
+    try actions.append(allocator, .{ .verify_signature = .{
+        .image = c.image,
+        .certificate_identity = p.certificate_identity,
+        .oidc_issuer = p.oidc_issuer,
+    } });
+
     const pull_tmpdir = try std.fmt.allocPrint(allocator, "TMPDIR={s}", .{scratch_tmp});
     try actions.append(allocator, .{ .command = .{
         .label = "pull image",
@@ -178,6 +192,10 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
             c.image,
         }),
         .trace = true,
+    } });
+    try actions.append(allocator, .{ .wipe_partitions = .{
+        .label = "clear signatures in existing partitions",
+        .disk = c.disk,
     } });
 
     var bootc_args: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -269,6 +287,7 @@ test "plan builds both profiles and keeps secrets out of argv" {
     const plan = try build(a, c, "00000000-0000-4000-8000-000000000000");
 
     var found_install = false;
+    var found_partition_wipe = false;
     for (plan.actions) |action| switch (action) {
         .command => |cmd| {
             for (cmd.argv) |arg| try std.testing.expect(!std.mem.eql(u8, arg, "secret"));
@@ -277,9 +296,11 @@ test "plan builds both profiles and keeps secrets out of argv" {
                 try std.testing.expect(std.mem.indexOf(u8, cmd.argv[cmd.argv.len - 1], "/dev/vda") != null);
             }
         },
+        .wipe_partitions => found_partition_wipe = true,
         else => {},
     };
     try std.testing.expect(found_install);
+    try std.testing.expect(found_partition_wipe);
 }
 
 test "registry derived from image" {
@@ -694,4 +715,38 @@ test "configured scratch disk drives wipefs mkfs and mounts" {
     try std.testing.expect(saw_mkfs);
     try std.testing.expectEqual(@as(usize, 2), scratch_mounts);
     try std.testing.expect(saw_install);
+}
+
+test "signature verification uses profile identity before the pull" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var identities: [2][]const u8 = undefined;
+    for ([_]profile_mod.Id{ .mjolnir, .muramasa }, 0..) |id, i| {
+        var c = config_mod.defaults();
+        c.disk = "/dev/vda";
+        config_mod.applyProfile(&c, id);
+        const p = try build(a, c, "00000000-0000-4000-8000-000000000000");
+
+        var verify_index: ?usize = null;
+        var pull_index: ?usize = null;
+        for (p.actions, 0..) |action, j| switch (action) {
+            .verify_signature => |sig| {
+                verify_index = j;
+                identities[i] = sig.certificate_identity;
+                try std.testing.expectEqualStrings(profile_mod.get(id).certificate_identity, sig.certificate_identity);
+                try std.testing.expectEqualStrings(profile_mod.get(id).oidc_issuer, sig.oidc_issuer);
+                try std.testing.expectEqualStrings(c.image, sig.image);
+            },
+            .command => |cmd| {
+                if (std.mem.eql(u8, cmd.label, "pull image")) pull_index = j;
+            },
+            else => {},
+        };
+        try std.testing.expect(verify_index != null);
+        try std.testing.expect(pull_index != null);
+        try std.testing.expect(verify_index.? < pull_index.?);
+    }
+    try std.testing.expect(!std.mem.eql(u8, identities[0], identities[1]));
 }

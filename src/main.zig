@@ -7,8 +7,11 @@ const disk = @import("disk.zig");
 const plan = @import("plan.zig");
 const execute = @import("execute.zig");
 const verify = @import("verify.zig");
+const signature = @import("signature.zig");
 const cli = @import("cli.zig");
 const tui = @import("tui.zig");
+const console = @import("console.zig");
+const console_generator = @import("console_generator.zig");
 const tests = @import("tests.zig");
 
 comptime {
@@ -19,6 +22,9 @@ comptime {
     _ = plan;
     _ = execute;
     _ = verify;
+    _ = signature;
+    _ = console;
+    _ = console_generator;
     _ = tests;
 }
 
@@ -74,5 +80,10 @@ fn run(init: std.process.Init) !void {
 }
 
 pub fn main(init: std.process.Init) !void {
-    try run(init);
+    run(init) catch |err| {
+        const message = config.errorMessage(err) orelse @errorName(err);
+        const line = std.fmt.allocPrint(init.arena.allocator(), "{s}\n", .{message}) catch message;
+        writeErr(init.io, line) catch {};
+        std.process.exit(1);
+    };
 }

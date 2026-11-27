@@ -9,12 +9,15 @@ pub const Profile = struct {
     id: Id,
     label: []const u8,
     image: []const u8,
+    certificate_identity: []const u8,
+    oidc_issuer: []const u8,
     filesystem: []const u8 = "btrfs",
     bootloader: []const u8 = "systemd",
     min_disk_bytes: u64 = 20 * 1000 * 1000 * 1000,
     require_uki: bool = true,
     state_label: ?[]const u8 = null,
     kargs: []const []const u8 = &.{},
+    accepts_identity: bool = true,
 };
 
 pub fn get(id: Id) Profile {
@@ -23,11 +26,14 @@ pub fn get(id: Id) Profile {
             .id = .mjolnir,
             .label = "Mjolnir server",
             .image = "ghcr.io/huntedraven7/mjolnir:testing",
+            .certificate_identity = "^https://github\\.com/HuntedRaven7/Mjolnir/\\.github/workflows/build\\.yml@refs/heads/(testing|gh-readonly-queue/testing/.+)$",
+            .oidc_issuer = "https://token.actions.githubusercontent.com",
             // bootc runs mkfs inside the target image, which ships mkfs.ext4
             // but no mkfs.btrfs. bootc adds -O verity for ext4, which a strict
             // composefs UKI needs.
             .filesystem = "ext4",
             .state_label = "MjolnirState",
+            .accepts_identity = false,
             .kargs = &.{
                 "systemd.firstboot=no",
                 "quiet",
@@ -39,6 +45,8 @@ pub fn get(id: Id) Profile {
             .id = .muramasa,
             .label = "Muramasa desktop",
             .image = "ghcr.io/huntedraven7/muramasa:testing",
+            .certificate_identity = "^https://github\\.com/HuntedRaven7/Muramasa/\\.github/workflows/build\\.yml@refs/heads/(testing|gh-readonly-queue/testing/.+)$",
+            .oidc_issuer = "https://token.actions.githubusercontent.com",
             .state_label = null,
             .kargs = &.{"quiet"},
         },
