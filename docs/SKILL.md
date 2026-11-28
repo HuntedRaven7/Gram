@@ -11,11 +11,13 @@ Read `AGENTS.md` first. This file points to the right document and check for the
 | Change WiFi or persistence | `src/execute.zig` | Full-install test if state partition behavior changes |
 | Change the ISO | `scripts/build-iso.sh`, `iso/gram-installer.service` | `scripts/vm-test.sh` in QEMU with OVMF |
 | Run a VM test | `scripts/vm-test.sh` | Serial log contains the installer service start |
-| Run a full install | `scripts/vm-install-test.sh` | Install log and target boot log both pass |
+| Run a full install | `scripts/vm-install-test.sh`, `scripts/check-boot-log.sh` | Install log and target boot log both pass; `tests/check-boot-log-fixtures.sh` proves the assertions catch bad logs |
 | Debug CI | `.github/workflows/ci.yml` | `zizmor .github/workflows`, then `gh run list --repo HuntedRaven7/Gram --limit 5` |
 | Lint shell | `scripts/*.sh` | `shellcheck` and `shfmt -i 2 -d` |
 | Review secrets handling | `SECURITY.md`, `src/tests.zig` | `gitleaks git . --config .gitleaks.toml`, secret-redaction test |
 | Cut a release | `.github/workflows/iso.yml` | Tag run uploads ISO, checksums, and provenance |
+
+Mjolnir's firstboot wizard waits for input on the harness serial console, so `multi-user.target` is not reached and the enabled `mjolnir-boot-report.service` never prints bootc status JSON. Assert the pinned digest from the install log instead. `scripts/check-boot-log.sh` allows three named failed units as harness or shell-free-image artifacts and warns for each; every other failed unit still fails the run.
 
 ## Checklist for every PR
 
