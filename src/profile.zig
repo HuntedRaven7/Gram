@@ -5,6 +5,21 @@ pub const Id = enum {
     muramasa,
 };
 
+/// bootc --block-setup mode for the target root. Mjolnir stays at .none: its
+/// image enrolls the encrypted state key on first boot from the signed UKI, so
+/// Gram must not install a root LUKS that would bind to a stale PCR policy.
+pub const BlockSetup = enum {
+    none,
+    tpm2_luks,
+
+    pub fn argument(self: BlockSetup) ?[]const u8 {
+        return switch (self) {
+            .none => null,
+            .tpm2_luks => "tpm2-luks",
+        };
+    }
+};
+
 pub const Profile = struct {
     id: Id,
     label: []const u8,
@@ -17,6 +32,7 @@ pub const Profile = struct {
     require_uki: bool = true,
     state_label: ?[]const u8 = null,
     kargs: []const []const u8 = &.{},
+    block_setup: BlockSetup = .none,
     accepts_identity: bool = true,
 };
 
@@ -49,6 +65,7 @@ pub fn get(id: Id) Profile {
             .oidc_issuer = "https://token.actions.githubusercontent.com",
             .state_label = null,
             .kargs = &.{"quiet"},
+            .block_setup = .tpm2_luks,
         },
     };
 }
@@ -65,4 +82,11 @@ test "profile defaults" {
     try std.testing.expect(m.require_uki);
     try std.testing.expectEqualStrings("MjolnirState", m.state_label.?);
     try std.testing.expectEqualStrings("muramasa", @tagName(get(.muramasa).id));
+}
+
+test "block setup is owned by the profile" {
+    try std.testing.expectEqual(BlockSetup.none, get(.mjolnir).block_setup);
+    try std.testing.expectEqual(BlockSetup.tpm2_luks, get(.muramasa).block_setup);
+    try std.testing.expect(get(.mjolnir).block_setup.argument() == null);
+    try std.testing.expectEqualStrings("tpm2-luks", get(.muramasa).block_setup.argument().?);
 }
