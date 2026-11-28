@@ -47,10 +47,12 @@ The RPM packages installed by `dnf` during the ISO build are not tracked. They f
 
 ## Install profiles
 
-A profile owns the image reference, filesystem, bootloader, minimum disk size, kernel arguments, and the expected state partition label.
+A profile owns the image reference, filesystem, bootloader, minimum disk size, kernel arguments, root encryption mode, and the expected state partition label.
 
 - `mjolnir` uses `ghcr.io/huntedraven7/mjolnir:testing`, ext4, systemd-boot, a signed UKI, and the `MjolnirState` partition. It adds the volatile-root kargs from the Mjolnir image.
 - `muramasa` uses `ghcr.io/huntedraven7/muramasa:testing` and the same install mechanics. Its exact state layout is not published, so Gram accepts any partition with a label ending in `State` and warns when it finds none.
+
+The `encrypted` config key asks for encryption, and the profile decides how. Mjolnir's install never passes `--block-setup`. Its image enrolls the encrypted state key on first boot from the signed UKI's embedded PCR signatures and public key, so a signed UKI update keeps the key usable. Gram passes no PCR key. Muramasa installs its root with `--block-setup tpm2-luks` when encryption is requested.
 
 Both profiles call `podman run --privileged ... bootc install to-disk --composefs-backend --bootloader systemd --wipe`, with `--filesystem` taken from the profile. Mjolnir uses ext4 because its pinned image ships `mkfs.ext4` but no `mkfs.btrfs` and bootc runs mkfs inside the target image; Muramasa keeps btrfs. Gram leaves out `--run-repart`. The live ISO's systemd-repart cannot parse the target image's `Type=state` definition. The installed image creates its state partition on first boot with its own systemd-repart. Gram still verifies the ESP, the UKI, the systemd-boot loader, and the root filesystem before it reports success.
 

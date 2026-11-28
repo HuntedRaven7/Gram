@@ -217,7 +217,11 @@ pub fn build(allocator: std.mem.Allocator, c: config_mod.Config, machine_id: []c
         "bootc",               "install",                 "to-disk",
         "--composefs-backend",
     });
-    if (c.encrypt) try bootc_args.appendSlice(allocator, &.{ "--block-setup", "tpm2-luks" });
+    if (c.encrypt) {
+        if (p.block_setup.argument()) |setup| {
+            try bootc_args.appendSlice(allocator, &.{ "--block-setup", setup });
+        }
+    }
     try bootc_args.appendSlice(allocator, &.{
         "--wipe",
         "--filesystem",
@@ -621,6 +625,106 @@ test "bootc install leaves state partition creation to first boot" {
         else => {},
     };
     try std.testing.expect(found);
+}
+
+test "block setup follows the profile when encryption is requested" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const id = "00000000-0000-4000-8000-000000000000";
+
+    var c = config_mod.defaults();
+    c.disk = "/dev/vda";
+    c.encrypt = true;
+
+    const mjolnir = try build(a, c, id);
+    var found_mjolnir = false;
+    for (mjolnir.actions) |action| switch (action) {
+        .command => |cmd| {
+            if (std.mem.eql(u8, cmd.label, "bootc install to-disk")) {
+                found_mjolnir = true;
+                try expectArgv(cmd.argv, &.{
+                    "podman",
+                    "run",
+                    "--rm",
+                    "--privileged",
+                    "--pid=host",
+                    "--root",
+                    container_graphroot,
+                    "--runroot",
+                    container_runroot,
+                    "-v",
+                    "/dev:/dev",
+                    "--tmpfs",
+                    "/run/udev",
+                    "-v",
+                    "/var/lib/containers:/var/lib/containers",
+                    "--security-opt",
+                    "label=type:unconfined_t",
+                    "ghcr.io/huntedraven7/mjolnir:testing",
+                    "bootc",
+                    "install",
+                    "to-disk",
+                    "--composefs-backend",
+                    "--wipe",
+                    "--filesystem",
+                    "ext4",
+                    "--bootloader",
+                    "systemd",
+                    "/dev/vda",
+                });
+            }
+        },
+        else => {},
+    };
+    try std.testing.expect(found_mjolnir);
+
+    config_mod.applyProfile(&c, .muramasa);
+    const muramasa = try build(a, c, id);
+    var found_muramasa = false;
+    for (muramasa.actions) |action| switch (action) {
+        .command => |cmd| {
+            if (std.mem.eql(u8, cmd.label, "bootc install to-disk")) {
+                found_muramasa = true;
+                try expectArgv(cmd.argv, &.{
+                    "podman",
+                    "run",
+                    "--rm",
+                    "--privileged",
+                    "--pid=host",
+                    "--root",
+                    container_graphroot,
+                    "--runroot",
+                    container_runroot,
+                    "-v",
+                    "/dev:/dev",
+                    "--tmpfs",
+                    "/run/udev",
+                    "-v",
+                    "/var/lib/containers:/var/lib/containers",
+                    "--security-opt",
+                    "label=type:unconfined_t",
+                    "ghcr.io/huntedraven7/muramasa:testing",
+                    "bootc",
+                    "install",
+                    "to-disk",
+                    "--composefs-backend",
+                    "--block-setup",
+                    "tpm2-luks",
+                    "--wipe",
+                    "--filesystem",
+                    "btrfs",
+                    "--bootloader",
+                    "systemd",
+                    "--karg=quiet",
+                    "--karg=systemd.machine_id=00000000-0000-4000-8000-000000000000",
+                    "/dev/vda",
+                });
+            }
+        },
+        else => {},
+    };
+    try std.testing.expect(found_muramasa);
 }
 
 fn graphrootFrom(content: []const u8) ?[]const u8 {
